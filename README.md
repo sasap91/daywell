@@ -6,8 +6,9 @@ import**; Daywell shows how your week is tracking against **your own goals** and
 against **cited healthy-aging guidelines**, and gives you **one evidence-anchored
 next step** — including through a hands-free **voice companion**.
 
-Everything stays in your browser on your device. There is no account, no server,
-no cloud AI.
+Everything stays in your browser on your device. There is no account and no
+server. An **optional AI layer** (off by default) can interpret your week — on-device,
+or with Claude using your own API key.
 
 > **What Daywell will never do:** diagnose you, score your health, infer a mental
 > state, or estimate/claim a biological age. It reports *what you logged* and how
@@ -30,6 +31,9 @@ no cloud AI.
   anxious") gets support, not a refusal.
 - 🫁 **Guided breathing** — "breathe with me" (or one tap) runs a spoken one-minute
   box-breathing exercise and logs it. The agent *acts*, not just suggests.
+- ✨ **Optional AI read** (off by default) — an LLM interprets your verified week,
+  picks the next step, and handles questions the rules can't. Code checks every
+  word before you see it; the rules remain the fallback. On-device or Claude.
 - 🎯 **Personalized next step** — adapts to your one-tap check-in, your calendar
   (never mid-meeting), your routine, and **what you actually do** (your
   most-used activities are suggested first).
@@ -123,6 +127,32 @@ one, every time, instead of a "not sure on that one" fallback.
 
 ---
 
+## AI layer (optional)
+
+Daywell is **hybrid**: deterministic code computes every fact, and an LLM — if you
+turn it on in **Setup → AI assistant** — interprets those facts.
+
+| Step | Who does it |
+| --- | --- |
+| Count minutes, sessions, pace; check guidelines; read your check-in | **Code** (`analyze.js`) |
+| Safety: crisis / distress detection, crisis lines, support card | **Code only** — never the model |
+| A short read on your week + one next step (+ up to two more) | **LLM** (`llm.js`), from the verified facts |
+| Open-ended questions the rules can't answer; messy multi-activity logs | **LLM**, with proposed log entries |
+| Accept or reject everything the LLM returns | **Code** — real saved-activity ids only, provided sources only, length limits, and no diagnosis / condition / medication / biological-age language |
+| If the LLM is off, slow, offline, or fails a check | **Code** — the rule-based result, so the app always works |
+
+**Providers.** *On-device* (the browser's built-in model, e.g. Chrome's built-in AI —
+nothing leaves the device) or *Claude* (Anthropic API with **your own key**, stored
+only in this browser; default model Claude Opus 5.5, with Sonnet 5.5 and Haiku 4.5
+as faster options).
+
+**What the model sees:** goal progress, guideline status, today's mood/energy
+numbers, your saved activity titles, and recent activity titles — never your name,
+age, region, check-in notes, or heart rate. Setup shows the exact payload. The
+standard rule-based suggestion stays visible next to the AI's for comparison.
+
+---
+
 ## How Daywell decides (the "science")
 
 `analyze.js` is deterministic and honest. For the current week it compares your
@@ -164,6 +194,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 | **Voice input (STT)** | Browser Web Speech API | May send audio to the browser's online service; browser-dependent. Disclosed at the mic |
 | **Voice output (TTS)** | Browser SpeechSynthesis, best natural voice | Quality varies by OS/browser; premium/consistent voice needs native |
 | **Reminders** | Local notification when you open the app if you're off pace | A web page can't do reliable background push; that's a native-app capability |
+| **AI (optional)** | On-device browser model, or Claude with your own API key | Claude sends minimal facts to Anthropic (disclosed, previewable); on-device needs a browser with a built-in model |
 | **Biological age** | *Not computed, ever* | Requires lab biomarkers / DNA-methylation testing, not activity logs |
 
 ---
@@ -173,7 +204,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # unit tests: node --test tests/*.test.js — 87 cases
+npm test                        # unit tests: node --test tests/*.test.js — 94 cases
 npm run smoke                   # headless-Chrome smoke test of the real UI (needs Chrome)
 ```
 
@@ -196,6 +227,7 @@ notifications) are thin, feature-detected wrappers.
 | Recap ("what you've done", spoken) | `src/planner/recap.js` |
 | Safety layer (crisis / distress / region lines / breathing) | `src/planner/safety.js` |
 | First-run setup, starter library, recommended goals | `src/planner/onboarding.js` |
+| Optional LLM layer (context, prompts, providers, validation) | `src/planner/llm.js` |
 | UI smoke test (headless Chrome) | `tests/smoke/run.mjs` |
 | Voice Q&A / command intent (deterministic) | `src/planner/ask.js` |
 | Voice personas (characters) | `src/planner/persona.js` |
@@ -217,8 +249,9 @@ Product requirements and the evaluation that shaped these boundaries are in
 
 ## Privacy & boundaries
 
-- **Your data never leaves the device** (except what the browser's speech service
-  may do for voice input, which is disclosed). No account, server, or analytics.
+- **Your data never leaves the device** — except what the browser's speech service
+  may do for voice input, and the minimal facts sent to Claude *if* you enable it
+  with your own key (both disclosed). No account, server, or analytics.
 - **No health claims** — no diagnosis, disease-risk prediction, biological age,
   calorie/nutrition math, or mental-health inference. Health-judgment questions get
   an honest refusal and a pointer to a qualified professional.

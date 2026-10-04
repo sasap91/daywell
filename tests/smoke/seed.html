@@ -7,5 +7,6 @@
   const payload = JSON.parse(atob(decodeURIComponent(location.hash.slice(1))));
   localStorage.clear();
   if (payload.state) localStorage.setItem('daywell.app.v7', JSON.stringify(payload.state));
+  if (payload.ai) localStorage.setItem('daywell.ai.v1', JSON.stringify(payload.ai));
   location.replace(`/index.html#${payload.view || 'today'}`);
 </script>

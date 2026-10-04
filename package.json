@@ -1,6 +1,6 @@
 {
   "name": "daywell",
-  "version": "8.1.0",
+  "version": "9.0.0",
   "description": "Daywell — local-first personal health agent for physical and mental wellbeing.",
   "type": "module",
   "private": true,

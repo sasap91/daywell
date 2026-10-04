@@ -276,3 +276,10 @@ body { padding-bottom: calc(var(--composer-h, 140px) + env(safe-area-inset-botto
 .bubble.daywell { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .bubble.undone { opacity: .55; text-decoration: line-through; }
 .bubble .undo { font-size: 12px; }
+
+/* ---- AI layer ---- */
+.ai-analysis { margin: 0 0 12px; padding: 12px 14px; border-radius: 8px; background: #f1eefa; border: 1px solid #ddd5f0; color: #3b3357; font-size: 14.5px; line-height: 1.5; }
+.ai-status { margin: 0 0 10px; }
+.ai-badge { font: 600 10px var(--mono); color: #5b4b8a; background: #ece7f8; border-radius: 999px; padding: 2px 7px; align-self: center; }
+.bubble.thinking span { opacity: .6; font-style: italic; }
+.ai-preview { max-height: 260px; overflow: auto; font: 11.5px/1.45 var(--mono); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre; }

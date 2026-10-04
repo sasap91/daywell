@@ -35,8 +35,8 @@ const base = (over = {}) => ({
 // Async on purpose: a sync spawn would block this process's static server.
 // Chrome dumps the DOM but often lingers (background updater), so we resolve
 // as soon as the dump is complete and kill it.
-function load(view, state) {
-  const hash = encodeURIComponent(Buffer.from(JSON.stringify({ view, state })).toString('base64'));
+function load(view, state, ai = null) {
+  const hash = encodeURIComponent(Buffer.from(JSON.stringify({ view, state, ai })).toString('base64'));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'daywell-smoke-'));
   return new Promise((resolve) => {
     const child = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
@@ -67,18 +67,21 @@ const cases = [
     has: ['You don’t have to go through this alone', '1323', 'findahelpline.com', 'Breathe with me'], lacks: ['class="nudge '] },
   { name: 'history view', view: 'history', state: base(), has: ['Logged today', 'morning walk', 'Sleep &amp; heart rate', 'Import'], lacks: [] },
   { name: 'plan view', view: 'plan', state: base(), has: ['Today\'s plan', 'Suggested activities'], lacks: [] },
-  { name: 'setup view', view: 'setup', state: base(), has: ['About you', 'Region (for support lines)', 'Voice', 'Weekly goals', 'Use recommended'], lacks: [] },
+  { name: 'setup view', view: 'setup', state: base(), has: ['About you', 'Region (for support lines)', 'Voice', 'Weekly goals', 'Use recommended', 'AI assistant', 'Off — built-in rules only'], lacks: [] },
+  { name: 'AI enabled but unavailable → still a recommendation (rules fallback)', view: 'today', state: base(), ai: { provider: 'ondevice' },
+    has: ['Do next', 'class="rec primary'], hasAny: ['AI unavailable', 'AI read', 'Personalizing with AI'], lacks: [] },
 ];
 
 let failed = 0;
 for (const c of cases) {
-  const { dom, errors } = await load(c.view, c.state);
+  const { dom, errors } = await load(c.view, c.state, c.ai || null);
   const problems = [];
   if (!dom.includes('id="view"')) problems.push('page did not load');
   if (dom.includes('data-render-error')) problems.push('render error boundary was shown');
   if (!dom.includes('id="composer-input"')) problems.push('composer missing');
   for (const h of c.has) if (!dom.includes(h)) problems.push(`missing: ${h}`);
   for (const l of c.lacks) if (dom.includes(l)) problems.push(`unexpected: ${l}`);
+  if (c.hasAny && !c.hasAny.some((h) => dom.includes(h))) problems.push(`missing one of: ${c.hasAny.join(' | ')}`);
   const jsErrors = errors.split('\n').filter((l) => /Uncaught|SyntaxError|ReferenceError|TypeError/.test(l));
   if (jsErrors.length) problems.push(...jsErrors.map((l) => `JS error: ${l.trim().slice(0, 200)}`));
   if (problems.length) { failed += 1; console.log(`✖ ${c.name}\n   ${problems.join('\n   ')}`); }

@@ -109,7 +109,7 @@ export function answerQuery(state, iso, text, ctx = {}) {
 
   if (/(next|what should i|suggest|recommend|what now|what do i do)/.test(t)) {
     const { primary } = buildNudges(state, iso, nowMin);
-    return { reply: primary ? primary.text : 'You’re on pace. Keep your routine.' };
+    return { reply: primary ? primary.text : 'You’re on pace. Keep your routine.', intent: 'next' };
   }
 
   if (/(on track|behind|am i on|status)/.test(t)) {
@@ -127,5 +127,5 @@ export function answerQuery(state, iso, text, ctx = {}) {
     return { reply: `${pick(['Anytime', 'You’re welcome', 'Glad to help'])}${ctx.name ? `, ${ctx.name}` : ''}! Anything else?` };
   }
 
-  return { reply: 'Hmm, not sure on that one. I can tell you how your week’s going, switch to day, week, or month, what you did, or what to do next. What would you like?' };
+  return { reply: 'Hmm, not sure on that one. I can tell you how your week’s going, switch to day, week, or month, what you did, or what to do next. What would you like?', fallback: true }; // the LLM (if enabled) takes these turns
 }

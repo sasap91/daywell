@@ -655,3 +655,119 @@ test('91 onboarding adds a balanced starter library once', async () => {
   assert.equal(v.region, 'TH'); assert.equal(v.goalsSet, true); assert.equal(v.onboardingDismissed, true);
   assert.equal(validateState({ profile: { region: 'nowhere' } }).state.profile.region, '');
 });
+
+// ---- LLM layer: models propose, code verifies, rules are the fallback ----
+const llmState = () => stateWith((st) => {
+  st.profile.name = 'Sasa'; st.profile.age = 35; st.profile.region = 'TH';
+  st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 5 };
+  st.library.activities = [lib({ id: 'box', category: 'meditation', title: 'Box breathing', durationMin: 5 }), lib({ id: 'walk', category: 'movement', title: 'Brisk walk', durationMin: 20 })];
+  const d = ensureDay(st, '2026-10-08');
+  d.checkin = { mood: 3, energy: 2, note: 'private worry about my boss', at: '' };
+  d.activityLog = [log({ category: 'movement', text: 'morning walk', durationMin: 30 })];
+  d.health = { restingHR: 58, sleepHours: 6.2, source: 'manual' };
+});
+const goodRec = { analysis: 'Movement is underway, mind sessions are behind.', next_step: { title: 'Do your box breathing', why: 'You have 1 of 5 mind sessions and low energy today.', category: 'meditation', activity_id: 'box', minutes: 5, source_key: 'nccih_mind' }, also_consider: [] };
+const mockFetch = (input, capture = {}) => async (url, opts) => {
+  capture.url = url; capture.headers = opts.headers; capture.body = JSON.parse(opts.body);
+  return { ok: true, json: async () => ({ content: [{ type: 'tool_use', name: capture.body.tool_choice.name, input }] }) };
+};
+
+// 92. context is minimal: no name, age, region, notes, or heart rate
+test('92 buildContext sends only minimal verified facts', async () => {
+  const { buildContext } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = llmState();
+  const json = JSON.stringify(buildContext(s, '2026-10-08', analyze(s, '2026-10-08'), 20 * 60));
+  for (const secret of ['Sasa', 'private worry', '"TH"', 'restingHR', '"age"', 'region', 'note']) assert.ok(!json.includes(secret), `leaked ${secret}`);
+  assert.ok(json.includes('"box"') && json.includes('energy_1_to_5'));
+});
+
+// 93. valid model output is accepted and mapped to real data + real sources
+test('93 validateRecommendation accepts grounded output', async () => {
+  const { validateRecommendation, buildContext, SOURCES } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = llmState(); const ctx = buildContext(s, '2026-10-08', analyze(s, '2026-10-08'));
+  const v = validateRecommendation(goodRec, ctx);
+  assert.equal(v.ok, true);
+  assert.equal(v.value.next.activityId, 'box');
+  assert.equal(v.value.next.source, SOURCES.nccih_mind);
+});
+
+// 94. invented ids are dropped; unsafe or malformed output is rejected
+test('94 validateRecommendation rejects unsafe or invented output', async () => {
+  const { validateRecommendation, buildContext } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = llmState(); const ctx = buildContext(s, '2026-10-08', analyze(s, '2026-10-08'));
+  const invented = validateRecommendation({ ...goodRec, next_step: { ...goodRec.next_step, activity_id: 'made-up', category: 'music', source_key: 'fake_journal' } }, ctx);
+  assert.equal(invented.ok, true);
+  assert.equal(invented.value.next.activityId, null); // not a real saved activity
+  assert.equal(invented.value.next.source, null); // not a provided source
+  for (const bad of [
+    'Your low energy suggests you have an anxiety disorder.',
+    'This will lower your biological age.',
+    'Consider a magnesium supplement.',
+    'This reduces cancer risk.',
+    'You may have anxiety, so rest.',
+    'It sounds like insomnia.',
+  ]) assert.equal(validateRecommendation({ ...goodRec, analysis: bad }, ctx).ok, false, bad);
+  assert.equal(validateRecommendation({ ...goodRec, next_step: { ...goodRec.next_step, category: 'surgery', activity_id: '' } }, ctx).ok, false);
+  assert.equal(validateRecommendation(null, ctx).ok, false);
+  // ordinary phrasing must NOT be blocked
+  assert.equal(validateRecommendation({ ...goodRec, analysis: 'You have 1 of 5 mind sessions; you have time today.' }, ctx).ok, true);
+});
+
+// 95. Claude call: browser headers, forced tool output, errors surface
+test('95 callClaude sends a forced structured call and parses it', async () => {
+  const { callClaude, RECOMMEND_TOOL, SYSTEM_PROMPT } = await import('../src/planner/llm.js');
+  const cap = {};
+  const out = await callClaude({ system: SYSTEM_PROMPT, prompt: 'p', tool: RECOMMEND_TOOL, cfg: { apiKey: 'k', model: 'claude-opus-5-5' }, fetchImpl: mockFetch(goodRec, cap) });
+  assert.equal(cap.url, 'https://api.anthropic.com/v1/messages');
+  assert.equal(cap.headers['anthropic-dangerous-direct-browser-access'], 'true');
+  assert.equal(cap.headers['x-api-key'], 'k');
+  assert.deepEqual(cap.body.tool_choice, { type: 'tool', name: 'propose_next_step' });
+  assert.equal(cap.body.model, 'claude-opus-5-5');
+  assert.equal(out.next_step.activity_id, 'box');
+  await assert.rejects(callClaude({ system: '', prompt: '', tool: RECOMMEND_TOOL, cfg: { apiKey: 'k' }, fetchImpl: async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'invalid x-api-key' } }) }) }), /401/);
+  await assert.rejects(callClaude({ system: '', prompt: '', tool: RECOMMEND_TOOL, cfg: { apiKey: '' } }), /No API key/);
+});
+
+// 96. end to end: good output → value; unsafe output → throws (app falls back to rules)
+test('96 aiRecommend returns validated output or throws for fallback', async () => {
+  const { aiRecommend } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = llmState(); const a = analyze(s, '2026-10-08'); const cfg = { provider: 'claude', apiKey: 'k', model: 'claude-opus-5-5' };
+  const v = await aiRecommend(s, '2026-10-08', a, cfg, { fetchImpl: mockFetch(goodRec) });
+  assert.equal(v.next.title, 'Do your box breathing');
+  await assert.rejects(aiRecommend(s, '2026-10-08', a, cfg, { fetchImpl: mockFetch({ ...goodRec, analysis: 'You are clinically depressed.' }) }), /rejected/);
+  await assert.rejects(aiRecommend(s, '2026-10-08', a, { provider: 'off' }), /off/);
+  // on-device provider path, injected
+  const od = await aiRecommend(s, '2026-10-08', a, { provider: 'ondevice' }, { onDevice: async () => goodRec });
+  assert.equal(od.next.activityId, 'box');
+});
+
+// 97. chat: validated reply + only well-formed log entries
+test('97 aiChat validates replies and proposed log entries', async () => {
+  const { aiChat, validateChat } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = llmState(); const a = analyze(s, '2026-10-08');
+  const v = await aiChat(s, '2026-10-08', a, 'did some lower-body work and a short breathing thing', { provider: 'claude', apiKey: 'k' },
+    { fetchImpl: mockFetch({ reply: 'Nice — logged both.', log_entries: [{ category: 'movement', title: 'Lower-body strength', minutes: 20 }, { category: 'meditation', title: 'Breathing', minutes: 5 }, { category: 'pizza', title: 'x', minutes: 5 }] }) });
+  assert.equal(v.entries.length, 2); // invalid category dropped
+  assert.equal(v.entries[0].durationMin, 20);
+  assert.equal(validateChat({ reply: 'Try a supplement for that.', log_entries: [] }).ok, false);
+});
+
+// 98. config defaults to off; rules flag the turns the AI may take
+test('98 AI config defaults off; ask.js marks fallback + next intents', async () => {
+  const { readAiConfig, aiReady } = await import('../src/planner/llm.js');
+  const mem = { v: null, getItem() { return this.v; }, setItem(k, v) { this.v = v; } };
+  const cfg = readAiConfig(mem);
+  assert.equal(cfg.provider, 'off'); assert.equal(aiReady(cfg), false);
+  mem.v = JSON.stringify({ provider: 'nonsense', model: 'gpt-x' });
+  assert.equal(readAiConfig(mem).provider, 'off');
+  assert.equal(aiReady({ provider: 'claude', apiKey: '' }), false);
+  const { answerQuery } = await import('../src/planner/ask.js');
+  assert.equal(answerQuery(defaultState(), '2026-10-08', 'blah blah quantum', {}).fallback, true);
+  assert.equal(answerQuery(defaultState(), '2026-10-08', 'what should I do next', {}).intent, 'next');
+  assert.notEqual(answerQuery(defaultState(), '2026-10-08', 'I want to hurt myself', {}).fallback, true); // safety never reaches AI
+});

@@ -16,6 +16,7 @@ import { answerQuery } from './ask.js';
 import { getPersona, PERSONA_KEYS, fill, pick } from './persona.js';
 import { safetyLevel, crisisResources, regionFromLocale, REGION_KEYS, REGION_LINES, breathingScript } from './safety.js';
 import { addStarterActivities, onboardingStatus, RECOMMENDED_GOALS, STARTER_ACTIVITIES } from './onboarding.js';
+import { readAiConfig, writeAiConfig, clearAiConfig, aiReady, aiRecommend, aiChat, buildContext, onDeviceStatus, CLAUDE_MODELS } from './llm.js';
 import { suggestActivities } from './match.js';
 import { recoverActivity } from './recovery.js';
 import { parseMovementUpload, parseHealthExport, isAppleHealthExport } from './ingest.js';
@@ -37,6 +38,11 @@ let chat = []; // { who: 'you'|'daywell', text, undo?: { iso, id }, undone? }
 let chatOpen = true;
 let composerDraft = '';
 let lastEntry = null; // most recent entry created in conversation → "45 minutes" amends it
+// Optional LLM layer (llm.js). Config is device-local; results are cached per
+// fingerprint of the verified facts so the model is called only when they change.
+let aiCfg = { provider: 'off', model: '', apiKey: '' };
+let aiRec = { key: null, status: 'idle', value: null, error: null };
+let onDeviceState = 'unknown';
 // Speech-to-speech voice mode state.
 let voiceMode = false;
 let voiceLoopStop = null;
@@ -55,6 +61,8 @@ function boot() {
   state = res.state;
   if (res.found && res.errors && res.errors.length) flash(`Recovered your data with ${res.errors.length} issue(s) fixed.`, 'warn');
   ensureDay(state, iso);
+  aiCfg = readAiConfig();
+  onDeviceStatus().then((st) => { onDeviceState = st; if (view === 'setup') render(); });
   view = viewFromHash();
   wireChrome();
   render();
@@ -125,6 +133,26 @@ function go(v) {
   window.scrollTo(0, 0);
 }
 
+// ---- LLM layer: interpret verified facts; code validates; rules are the fallback ----
+function aiOn() { return aiReady(aiCfg); }
+function aiFingerprint(a) { return `${aiCfg.provider}|${aiCfg.model}|${JSON.stringify(buildContext(state, iso, a, nowMinForView()))}`; }
+// Starts (at most once per set of facts) an AI recommendation. Never during a
+// distress/crisis moment — those stay fully deterministic.
+function ensureAiRec(a) {
+  if (!aiOn() || supportLevel()) return null;
+  const key = aiFingerprint(a);
+  if (aiRec.key === key) return aiRec;
+  aiRec = { key, status: 'loading', value: null, error: null };
+  aiRecommend(state, iso, a, aiCfg, { nowMin: nowMinForView() })
+    .then((v) => { if (aiRec.key === key) { aiRec = { key, status: 'ready', value: v, error: null }; render(); } })
+    .catch((err) => { if (aiRec.key === key) { aiRec = { key, status: 'error', value: null, error: String((err && err.message) || err) }; render(); } });
+  return aiRec;
+}
+function aiStepToRec(step, priority) {
+  const act = step.activityId ? state.library.activities.find((x) => x.id === step.activityId) : null;
+  return { priority, side: CATEGORIES[step.category].side, title: step.title, rationale: step.why, source: step.source, activity: act, addCat: act ? null : step.category, ai: true };
+}
+
 // ---- the composer: one input on every page. Type or talk; it logs, answers,
 // summarizes, and guides breathing through the same engine as voice mode.
 // Logging is instant with Undo (no confirm dialogs). ----
@@ -149,7 +177,8 @@ function renderComposer() {
     ]));
     const log = el('div', { class: 'chat', 'aria-live': 'polite' });
     for (const m of chat.slice(-6)) {
-      const b = el('div', { class: `bubble ${m.who}${m.undone ? ' undone' : ''}` }, [el('span', { text: m.text })]);
+      const b = el('div', { class: `bubble ${m.who}${m.undone ? ' undone' : ''}${m.thinking ? ' thinking' : ''}` }, [el('span', { text: m.text })]);
+      if (m.ai) b.append(el('span', { class: 'ai-badge', title: 'Written by the AI, checked against your data', text: '✨ AI' }));
       if (m.undo && !m.undone) b.append(el('button', { class: 'link undo', type: 'button', text: 'Undo', onclick: () => undoEntry(m) }));
       log.append(b);
     }
@@ -191,14 +220,19 @@ function send(raw) {
   const text = String(raw || '').trim();
   if (!text) return;
   composerDraft = '';
-  const { res } = converse(text, { spoken: false });
+  const { res, pending } = converse(text, { spoken: false });
   chatOpen = true;
   render();
   if (res.action === 'breathe') startBreathing();
   else focusComposer();
+  if (pending) pending.then(() => focusComposer());
 }
-// The single conversation path for typed AND spoken input.
+// The single conversation path for typed AND spoken input. Rule-handled turns
+// are instant; turns the rules can't handle go to the LLM (if enabled), whose
+// reply and proposed log entries are validated before anything is saved.
+// Returns { res, reply, pending } — pending resolves to the final reply text.
 function converse(text, { spoken }) {
+  const atIso = iso;
   const res = answerQuery(state, iso, text, { dimension: recapDim, nowMin: nowMinForView(), name: firstName(), persona: state.profile.persona, region: crisisRegion(), lastEntry });
   let reply = res.reply;
   let undo = null;
@@ -209,7 +243,7 @@ function converse(text, { spoken }) {
     day().activityLog.push({ id, category: res.entry.category, text: res.entry.text, durationMin: res.entry.durationMin || 0, source: spoken ? 'voice' : 'text', at: new Date().toISOString() });
     persist();
     lastEntry = { iso, id, text: res.entry.text };
-    undo = { iso, id };
+    undo = { iso, ids: [id] };
     const labels = newlyMetLabels(before);
     if (labels.length) { if (soundOn()) playChime(); reply = `${reply} ${cheerLine(labels)}`; }
   }
@@ -224,18 +258,52 @@ function converse(text, { spoken }) {
   }
   if (res.safety) raiseSupport(res.safety);
   if (res.dimension) recapDim = res.dimension;
+
+  const aiAllowed = aiOn() && !res.safety && !supportLevel();
+  // "What should I do next?" → the same AI next step the Today card shows, if ready.
+  if (aiAllowed && res.intent === 'next' && aiRec.status === 'ready' && aiRec.key === aiFingerprint(analyze(state, iso))) {
+    reply = `${aiRec.value.next.title}. ${aiRec.value.next.why}`;
+  }
   chat.push({ who: 'you', text });
-  chat.push({ who: 'daywell', text: reply, undo });
+  if (aiAllowed && res.fallback) {
+    const msg = { who: 'daywell', text: 'Thinking…', thinking: true };
+    chat.push(msg);
+    const pending = aiChat(state, atIso, analyze(state, atIso), text, aiCfg, { nowMin: nowMinForView() })
+      .then((v) => {
+        let final = v.reply;
+        if (v.entries.length) {
+          const before = goalMetKeys();
+          const ids = [];
+          for (const en of v.entries) {
+            const id = uid('al');
+            ensureDay(state, atIso).activityLog.push({ id, category: en.category, text: en.text, durationMin: en.durationMin, source: spoken ? 'voice' : 'text', at: new Date().toISOString() });
+            ids.push(id);
+            lastEntry = { iso: atIso, id, text: en.text };
+          }
+          persist();
+          msg.undo = { iso: atIso, ids };
+          const labels = newlyMetLabels(before);
+          if (labels.length) { if (soundOn()) playChime(); final = `${final} ${cheerLine(labels)}`; }
+        }
+        Object.assign(msg, { text: final, thinking: false, ai: true });
+        return final;
+      })
+      .catch(() => { Object.assign(msg, { text: res.reply, thinking: false }); return res.reply; })
+      .then((final) => { render(); return final; });
+    return { res, reply: res.reply, pending };
+  }
+  chat.push({ who: 'daywell', text: reply, undo, ai: aiAllowed && res.intent === 'next' && reply !== res.reply });
   if (chat.length > 40) chat = chat.slice(-40);
-  return { res, reply };
+  return { res, reply, pending: null };
 }
 function undoEntry(m) {
   const dd = state.days[m.undo.iso];
-  if (dd) dd.activityLog = dd.activityLog.filter((x) => x.id !== m.undo.id);
+  const ids = m.undo.ids || [m.undo.id];
+  if (dd) dd.activityLog = dd.activityLog.filter((x) => !ids.includes(x.id));
   m.undone = true;
-  if (lastEntry && lastEntry.id === m.undo.id) lastEntry = null;
+  if (lastEntry && ids.includes(lastEntry.id)) lastEntry = null;
   persist();
-  chat.push({ who: 'daywell', text: 'Undone — I removed that entry.' });
+  chat.push({ who: 'daywell', text: ids.length > 1 ? `Undone — I removed those ${ids.length} entries.` : 'Undone — I removed that entry.' });
   render();
 }
 
@@ -366,13 +434,27 @@ function renderToday(root) {
     if (cta.childNodes.length) card.append(cta);
     return card;
   };
-  const np = panel('Do next', a.capacity === 'low' || a.capacity === 'high' ? 'Adapted to your check-in' : 'One step, matched to your goals');
-  np.append(recCard(a.recommendations[0]));
-  const more = a.recommendations.slice(1);
+  // AI (if enabled) interprets the verified facts; the rule-based step shows
+  // instantly and remains the fallback — and stays visible for comparison.
+  const ai = ensureAiRec(a);
+  const aiReadyNow = Boolean(ai && ai.status === 'ready');
+  const rulesLabel = a.capacity === 'low' || a.capacity === 'high' ? 'Adapted to your check-in' : 'One step, matched to your goals';
+  const np = panel('Do next', aiReadyNow ? '✨ AI read · checked against your data' : rulesLabel);
+  if (aiReadyNow) np.append(el('p', { class: 'ai-analysis', text: ai.value.analysis }));
+  if (ai && ai.status === 'loading') np.append(el('p', { class: 'muted small ai-status', text: '✨ Personalizing with AI… showing the standard step meanwhile.' }));
+  if (ai && ai.status === 'error') np.append(el('p', { class: 'muted small ai-status', text: `AI unavailable — showing the standard recommendation. (${ai.error})` }));
+  const recs = aiReadyNow ? [aiStepToRec(ai.value.next, 'primary'), ...ai.value.more.map((st) => aiStepToRec(st, 'secondary'))] : a.recommendations;
+  np.append(recCard(recs[0]));
+  const more = recs.slice(1);
   if (more.length) {
     const det = el('details', { class: 'evidence' }, [el('summary', { text: `More suggestions (${more.length})` })]);
     for (const r of more) det.append(recCard(r));
     np.append(det);
+  }
+  if (aiReadyNow) {
+    const std = el('details', { class: 'evidence' }, [el('summary', { text: 'Standard suggestion (rule-based)' })]);
+    std.append(recCard({ ...a.recommendations[0], priority: 'secondary' }));
+    np.append(std);
   }
   root.append(np);
 
@@ -717,6 +799,8 @@ function renderSetup(root) {
   vs.append(el('p', { class: 'muted small', text: 'Persona changes how Daywell talks — personality only, never what’s counted; safety replies are always calm. “Hey Daywell” keeps the mic on while this page is open and may use your browser’s online speech service. Tap 🎤 in the message bar any time instead.' }));
   root.append(vs);
 
+  root.append(renderAiPanel());
+
   const g = panel('Weekly goals', 'You set these');
   const rgx = RECOMMENDED_GOALS;
   g.append(el('div', { class: 'row wrap' }, [
@@ -819,6 +903,62 @@ function addLib(formEl) {
   update(() => { state.library.activities.push({ id: uid('act'), category: $('#lib-cat').value, title, durationMin: Math.max(1, parseInt($('#lib-dur').value, 10) || 15), indoor: $('#lib-indoor').checked, tags: $('#lib-tags').value.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean) }); }, 'Added to library.');
   formEl.reset();
 }
+function renderAiPanel() {
+  const ap = panel('AI assistant', 'Optional · off by default');
+  const od = { available: 'ready', downloadable: 'downloads on first use', downloading: 'downloading…', unavailable: 'not available on this device', unsupported: 'not in this browser', unknown: 'checking…' }[onDeviceState] || onDeviceState;
+  const prov = selectEl('ai-provider', [
+    ['off', 'Off — built-in rules only (fully private)'],
+    ['ondevice', `On-device model — private (${od})`],
+    ['claude', 'Claude — your Anthropic API key (cloud)'],
+  ]);
+  prov.value = aiCfg.provider;
+  prov.addEventListener('change', (e) => { aiCfg = { ...aiCfg, provider: e.target.value }; writeAiConfig(aiCfg); aiRec = { key: null, status: 'idle', value: null, error: null }; render(); });
+  ap.append(el('div', { class: 'grid-form' }, [labeled('Provider', prov)]));
+
+  let statusText = 'Off. Daywell uses its built-in, rule-based analysis — nothing leaves this device.';
+  if (aiCfg.provider === 'ondevice') {
+    statusText = onDeviceState === 'available' || onDeviceState === 'downloadable' || onDeviceState === 'downloading'
+      ? 'Uses the model built into your browser. Nothing leaves this device.'
+      : 'This browser has no built-in AI model (e.g. Chrome’s built-in AI). Choose Claude, or keep using the rules — Daywell falls back automatically.';
+  }
+  if (aiCfg.provider === 'claude') {
+    const key = el('input', { id: 'ai-key', type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-ant-…', value: aiCfg.apiKey, 'aria-label': 'Anthropic API key' });
+    const model = selectEl('ai-model', CLAUDE_MODELS);
+    model.value = aiCfg.model;
+    ap.append(el('form', { class: 'grid-form', onsubmit: (e) => {
+      e.preventDefault();
+      aiCfg = { ...aiCfg, apiKey: $('#ai-key').value.trim(), model: $('#ai-model').value };
+      writeAiConfig(aiCfg); aiRec = { key: null, status: 'idle', value: null, error: null };
+      flash(aiCfg.apiKey ? 'AI connected. Your key stays in this browser.' : 'Key removed — AI is inactive.', 'ok'); render();
+    } }, [labeled('Anthropic API key', key), labeled('Model', model), el('button', { class: 'btn primary', type: 'submit', text: 'Save' })]));
+    statusText = aiCfg.apiKey
+      ? 'Connected with your key. Your key is stored only in this browser and billed to your Anthropic account.'
+      : 'Add your API key (console.anthropic.com) to turn it on.';
+  }
+  ap.append(el('p', { class: 'muted small', text: statusText }));
+
+  const how = el('details', { class: 'evidence' }, [el('summary', { text: 'How the AI is used — and what it sees' })]);
+  for (const line of [
+    'Code computes every number (minutes, pace, guidelines). The AI only interprets those facts: a short read on your week, your next step, and answers the rules can’t give.',
+    'Everything it returns is checked before you see it: only your real saved activities, only the cited WHO / CDC / NCCIH sources, and no diagnosis, condition, medication, or biological-age language. If a check fails — or the AI is slow or offline — you get the standard rule-based step.',
+    'It never sees your name, age, region, check-in notes, or heart rate. Crisis and distress moments never use AI; those replies and crisis lines are fixed and checked.',
+  ]) how.append(el('p', { class: 'small', text: line }));
+  how.append(el('p', { class: 'small', text: 'Exactly what would be sent right now:' }));
+  how.append(el('pre', { class: 'ai-preview', text: JSON.stringify(buildContext(state, iso, analyze(state, iso), nowMinForView()), null, 2) }));
+  ap.append(how);
+
+  if (aiOn()) {
+    ap.append(el('button', { class: 'btn tiny', text: 'Test AI', onclick: async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Testing…';
+      try {
+        const v = await aiRecommend(state, iso, analyze(state, iso), aiCfg, { nowMin: nowMinForView() });
+        flash(`AI works — suggested: “${v.next.title}”`, 'ok');
+      } catch (err) { flash(`AI test failed: ${(err && err.message) || err}`, 'error'); }
+      btn.disabled = false; btn.textContent = 'Test AI';
+    } }));
+  }
+  return ap;
+}
 function setPersona(key) {
   update(() => { state.profile.persona = key; });
   if (ttsSupported()) speak(greeting());
@@ -875,7 +1015,8 @@ async function onImport(e) {
 let deleteArmed = false;
 function deleteAll(e) {
   if (!deleteArmed) { deleteArmed = true; if (e && e.target) { e.target.textContent = 'Tap again to confirm delete'; e.target.classList.add('primary'); } flash('This deletes all local data on this device. Tap again to confirm.', 'warn'); setTimeout(() => { deleteArmed = false; render(); }, 4000); return; }
-  deleteArmed = false; clearState(); state = defaultState(); ensureDay(state, iso); persist(); render();
+  deleteArmed = false; clearState(); clearAiConfig(); aiCfg = readAiConfig(); aiRec = { key: null, status: 'idle', value: null, error: null }; chat = []; lastEntry = null;
+  state = defaultState(); ensureDay(state, iso); persist(); render();
   flash('All local data deleted on this device.', 'warn');
 }
 
@@ -1028,14 +1169,19 @@ function listenTurn() {
 function handleVoiceQuery(text) {
   if (voiceLoopStop) { voiceLoopStop(); voiceLoopStop = null; }
   voiceSpeaking = true; // guard onEnd from restarting while we answer
-  const { res, reply } = converse(text, { spoken: true });
-  voiceStatus = 'speaking'; chatOpen = true; render();
-  speakThen(reply, () => {
-    voiceSpeaking = false;
-    if (res.action === 'breathe') { startBreathing(); return; }
-    if (res.stop) { stopVoiceMode(); return; }
-    if (voiceMode) listenTurn();
-  }, { calm: !!res.safety || res.action === 'breathe' });
+  const { res, reply, pending } = converse(text, { spoken: true });
+  const speakNow = (finalText) => {
+    if (!voiceMode) { voiceSpeaking = false; return; } // user stopped while the AI was thinking
+    voiceStatus = 'speaking'; render();
+    speakThen(finalText, () => {
+      voiceSpeaking = false;
+      if (res.action === 'breathe') { startBreathing(); return; }
+      if (res.stop) { stopVoiceMode(); return; }
+      if (voiceMode) listenTurn();
+    }, { calm: !!res.safety || res.action === 'breathe' });
+  };
+  chatOpen = true;
+  if (pending) { voiceStatus = 'thinking'; render(); pending.then(speakNow); } else speakNow(reply);
 }
 // ---- guided box breathing: the agent ACTS, not just suggests ----
 function startBreathing() {
@@ -1073,6 +1219,7 @@ function finishBreathing(completed) {
 
 function voiceStatusText() {
   if (voiceStatus === 'breathing') return '🫁 Breathing together…';
+  if (voiceStatus === 'thinking') return '✨ Thinking…';
   if (voiceStatus === 'speaking') return '🔊 Speaking…';
   if (voiceStatus === 'listening') return '● Listening… say what you did, or ask a question';
   if (voiceStatus === 'waking') return '👂 Waiting for “Hey Daywell”…';
