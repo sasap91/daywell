@@ -94,6 +94,23 @@ function paceStatus(done, target, elapsed) {
   return { state, behind };
 }
 
+// How often each saved activity appears in the user's logs over the last 30
+// days (exact or contained title match). Returns a lookup fn(activity) → count.
+export function activityUsage(state, iso, days = 30) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const cutoff = new Date(y, m - 1, d - days);
+  const cutIso = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+  const texts = [];
+  for (const [dt, day] of Object.entries(state.days || {})) {
+    if (dt < cutIso || dt > iso) continue;
+    for (const l of day.activityLog || []) texts.push(String(l.text || '').toLowerCase());
+  }
+  return (activity) => {
+    const title = String(activity.title || '').toLowerCase();
+    return title ? texts.filter((t) => t === title || t.includes(title)).length : 0;
+  };
+}
+
 function metricsSummary(metrics) {
   return metrics.map((m) => (m.target > 0 ? `${m.label} ${m.done}/${m.target}` : `${m.label} (no goal)`)).join(' · ');
 }
@@ -125,11 +142,18 @@ export function analyze(state, iso) {
   };
 
   const anyGoal = metrics.some((m) => m.target > 0);
-  // First saved activity in the PREFERRED category order (suggestActivities sorts
-  // by duration only, which would otherwise ignore the preference).
+  // First saved activity in the PREFERRED category order; within a category, the
+  // one the user has actually done most in the last 30 days (learned from their
+  // own behavior), then shortest. suggestActivities alone sorts by duration only.
+  const usage = activityUsage(state, iso);
   const pickSaved = (cats) => {
     const sug = suggestActivities(state, iso, { categories: cats }).suggestions || [];
-    for (const c of cats) { const m = sug.find((x) => x.activity.category === c); if (m) return m.activity; }
+    for (const c of cats) {
+      const inCat = sug.filter((x) => x.activity.category === c);
+      if (inCat.length) {
+        return [...inCat].sort((a, b) => (usage(b.activity) - usage(a.activity)) || (a.activity.durationMin - b.activity.durationMin))[0].activity;
+      }
+    }
     return null;
   };
 

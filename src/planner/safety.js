@@ -24,19 +24,43 @@ export function detectCrisis(text) { return CRISIS_RE.test(String(text || '')); 
 export function detectDistress(text) { return !detectCrisis(text) && DISTRESS_RE.test(String(text || '')); }
 export function safetyLevel(text) { return detectCrisis(text) ? 'crisis' : (detectDistress(text) ? 'distress' : null); }
 
-// Shown on screen and spoken. Kept short so it can be read aloud.
-export const CRISIS_RESOURCES = [
-  { label: 'Emergency', detail: 'If you are in immediate danger, call your local emergency number.' },
-  { label: 'US', detail: 'Call or text 988 (Suicide & Crisis Lifeline), 24/7.' },
-  { label: 'Thailand', detail: 'Call 1323 (Department of Mental Health hotline), 24/7.' },
-  { label: 'Anywhere', detail: 'Find a free local line at findahelpline.com.' },
-];
+// Region-specific crisis lines (well-established national services). Unknown
+// region → emergency number + findahelpline.com, which covers every country.
+export const REGION_LINES = {
+  US: { label: 'United States', detail: 'Call or text 988 (Suicide & Crisis Lifeline), 24/7.', spoken: 'In the US you can call or text 9 8 8, any time.' },
+  CA: { label: 'Canada', detail: 'Call or text 988 (Suicide Crisis Helpline), 24/7.', spoken: 'In Canada you can call or text 9 8 8, any time.' },
+  GB: { label: 'UK & Ireland', detail: 'Call Samaritans on 116 123, 24/7.', spoken: 'You can call Samaritans on 1 1 6, 1 2 3, any time.' },
+  AU: { label: 'Australia', detail: 'Call Lifeline on 13 11 14, 24/7.', spoken: 'You can call Lifeline on 13, 11, 14, any time.' },
+  TH: { label: 'Thailand', detail: 'Call 1323 (Department of Mental Health hotline), 24/7.', spoken: 'In Thailand you can call 1 3 2 3, any time.' },
+};
+export const REGION_KEYS = Object.keys(REGION_LINES);
 
-export function crisisReply(name = '') {
+// Best guess from the browser locale; the user can override it in Setup.
+export function regionFromLocale(locale) {
+  const l = String(locale || '').toLowerCase();
+  if (/^th\b|-th$/.test(l)) return 'TH';
+  if (/-(gb|ie)$/.test(l)) return 'GB';
+  if (/-ca$/.test(l)) return 'CA';
+  if (/-au$/.test(l)) return 'AU';
+  if (/-us$/.test(l)) return 'US';
+  return null;
+}
+
+// Shown on screen. Emergency first, then the user's regional line, then a
+// directory that works anywhere.
+export function crisisResources(region) {
+  const out = [{ label: 'Emergency', detail: 'If you are in immediate danger, call your local emergency number.' }];
+  if (REGION_LINES[region]) out.push(REGION_LINES[region]);
+  out.push({ label: 'Anywhere', detail: 'Find a free local line at findahelpline.com.' });
+  return out;
+}
+
+export function crisisReply(name = '', region = null) {
   const who = name ? `${name}, ` : '';
+  const line = REGION_LINES[region] ? REGION_LINES[region].spoken : 'You can find a free local crisis line at find a helpline dot com.';
   return `${who}I'm really glad you told me. I'm not able to help in an emergency, but you deserve support right now. `
     + 'If you might act on these thoughts or you are in danger, please call your local emergency number. '
-    + 'In the US you can call or text 9 8 8, and in Thailand you can call 1 3 2 3, any time. '
+    + `${line} `
     + 'Is there someone you trust you could reach out to right now?';
 }
 

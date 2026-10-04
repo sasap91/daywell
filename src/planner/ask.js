@@ -20,6 +20,23 @@ const BREATHE = /(breathe with me|breathing exercise|guide me|help me (calm|rela
 
 const LOG_TRIGGER = /^(log|add|record)\b|\bi (just )?(did|went for|finished|completed|had|took|got in|wrapped up|knocked out|logged)\b|\blog (that|this|it)\b|^(went for|finished|completed) /i;
 
+// Build a log action from a statement. `explicit` = the user used a log verb
+// ("log…", "I did…"), so a duration alone is enough; otherwise a category is needed.
+function logAction(text, ctx, explicit) {
+  const cleaned = String(text)
+    .replace(/^\s*(please\s+)?(log|add|record)\s+/i, '')
+    .replace(/^\s*i\s+(just\s+)?(did|went for|finished|completed|had|took|got in|wrapped up|knocked out|logged)\s+(a\s+|an\s+|some\s+)?/i, '')
+    .replace(/^\s*(went for|finished|completed|did)\s+(a\s+|an\s+)?/i, '')
+    .trim();
+  const parsed = parseSpoken(cleaned || text);
+  const hasCat = detectCategories(cleaned).length > 0;
+  if (!(hasCat || (explicit && parsed.durationMin))) return null;
+  const who = ctx.name ? `, ${ctx.name}` : '';
+  const ack = pick(getPersona(ctx.persona).ack);
+  const tail = parsed.durationMin ? `, ${parsed.durationMin} minutes. Anything else?` : '. How long was it?';
+  return { action: 'log', entry: { category: parsed.category, text: parsed.title, durationMin: parsed.durationMin }, reply: `${ack}${who} — logged ${parsed.title}${tail}` };
+}
+
 function dimFrom(text) {
   if (/\b(today|day)\b/.test(text)) return 'day';
   if (/\b(month|monthly)\b/.test(text)) return 'month';
@@ -36,7 +53,7 @@ export function answerQuery(state, iso, text, ctx = {}) {
   if (!t) return { reply: 'I didn’t catch that. Try “how’s my week” or “what should I do next”.' };
 
   // 1. Safety always wins — even over "stop".
-  if (detectCrisis(t)) return { reply: crisisReply(ctx.name), safety: 'crisis' };
+  if (detectCrisis(t)) return { reply: crisisReply(ctx.name, ctx.region), safety: 'crisis' };
   if (BREATHE.test(t)) return { reply: 'Okay, let’s do it.', action: 'breathe' };
   if (detectDistress(t)) return { reply: distressReply(ctx.name), safety: 'distress' };
 
@@ -50,17 +67,20 @@ export function answerQuery(state, iso, text, ctx = {}) {
 
   // Logging by voice — "log a 30 minute walk", "I just finished a 10 min meditation".
   if (LOG_TRIGGER.test(t)) {
-    const cleaned = String(text)
-      .replace(/^\s*(please\s+)?(log|add|record)\s+/i, '')
-      .replace(/^\s*i\s+(just\s+)?(did|went for|finished|completed|had|took|got in|wrapped up|knocked out|logged)\s+(a\s+|an\s+|some\s+)?/i, '')
-      .replace(/^\s*(went for|finished|completed|did)\s+(a\s+|an\s+)?/i, '')
-      .trim();
-    const parsed = parseSpoken(cleaned || text);
-    if (detectCategories(cleaned).length || parsed.durationMin) {
-      const durPart = parsed.durationMin ? `, ${parsed.durationMin} minutes` : '';
-      const who = ctx.name ? `, ${ctx.name}` : '';
-      const ack = pick(getPersona(ctx.persona).ack);
-      return { action: 'log', entry: { category: parsed.category, text: parsed.title, durationMin: parsed.durationMin }, reply: `${ack}${who} — logged ${parsed.title}${durPart}. Anything else?` };
+    const la = logAction(text, ctx, true);
+    if (la) return la;
+  }
+
+  // Plain statements are logs too ("30 min walk", "yoga"), so typing feels like
+  // talking — but never questions, and never a bare stat word ("movement").
+  const isQuestion = /\?\s*$/.test(t) || /^(how|what|when|why|where|who|which|should|can|could|would|is|are|do|does|did|will|show|switch|change|tell)\b/.test(t);
+  if (!isQuestion && !/^(movement|exercise|workouts?|mind|mindfulness|sleep)$/.test(t)) {
+    if (detectCategories(t).length) { const la = logAction(text, ctx, false); if (la) return la; }
+    // A bare duration right after a log amends it ("…how long?" → "45 minutes").
+    const dur = parseSpoken(t).durationMin;
+    if (dur && !detectCategories(t).length && !wantedDim) {
+      if (ctx.lastEntry) return { action: 'amend', durationMin: dur, reply: `Updated — ${ctx.lastEntry.text}, ${dur} minutes.` };
+      return { reply: `What did you do for ${dur} minutes? For example, “${dur} minute walk”.` };
     }
   }
 
@@ -101,6 +121,10 @@ export function answerQuery(state, iso, text, ctx = {}) {
   if (wantedDim || asksRecap) {
     const r = recap(state, iso, wantedDim || dim);
     return { reply: r.speech, dimension: wantedDim || undefined };
+  }
+
+  if (/^(thanks|thank you|thx|cheers|great|ok|okay|cool|nice|awesome|perfect)\b/.test(t)) {
+    return { reply: `${pick(['Anytime', 'You’re welcome', 'Glad to help'])}${ctx.name ? `, ${ctx.name}` : ''}! Anything else?` };
   }
 
   return { reply: 'Hmm, not sure on that one. I can tell you how your week’s going, switch to day, week, or month, what you did, or what to do next. What would you like?' };

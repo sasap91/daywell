@@ -226,3 +226,53 @@ footer { padding: 22px 20px; background: var(--ink); color: #b8c8b7; font: 12px 
   .datebar .activity { margin-left: 0; width: 100%; }
   .panel { padding: 18px 14px; }
 }
+
+/* ===================== seamless agent UI ===================== */
+
+/* page reserves room for the fixed composer (height measured in JS) */
+body { padding-bottom: calc(var(--composer-h, 140px) + env(safe-area-inset-bottom, 0px)); }
+.flash { bottom: calc(var(--composer-h, 140px) + 12px + env(safe-area-inset-bottom, 0px)); }
+
+/* greeting */
+.hero { margin: 18px 2px 6px; }
+.hero h1 { margin: 0; font: 700 clamp(26px, 4.4vw, 36px)/1.1 var(--serif); letter-spacing: -.02em; }
+.hero-status { margin: 6px 0 0; font-size: 15px; font-weight: 600; }
+.hero-status.ok { color: var(--deep-sage); }
+.hero-status.warn { color: #8a5a1e; }
+
+/* one-tap check-in */
+.tap-row { display: grid; grid-template-columns: 64px repeat(5, minmax(0, 1fr)); gap: 6px; align-items: stretch; margin: 8px 0; }
+.tap-label { align-self: center; font-weight: 600; font-size: 14px; }
+.tap { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); min-height: 58px; transition: transform .08s ease, background .15s; }
+.tap:hover { border-color: var(--ink); }
+.tap:active { transform: scale(.96); }
+.tap.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.tap-emoji { font-size: 22px; line-height: 1; }
+.tap-name { font-size: 11px; }
+@media (max-width: 480px) { .tap-row { grid-template-columns: repeat(5, minmax(0, 1fr)); } .tap-label { grid-column: 1 / -1; } .tap-name { display: none; } }
+
+/* first-run setup */
+.onboard-step { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; margin: 8px 0; border: 1px dashed var(--line); border-radius: 8px; }
+.onboard-step.done { border-style: solid; background: #eef3ea; color: var(--deep-sage); }
+.onboard-step input { flex: 1 1 140px; min-width: 0; }
+
+/* composer: one input on every page */
+.composer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; background: rgba(252, 248, 237, .96); backdrop-filter: blur(6px); border-top: 1px solid var(--line); padding: 8px 16px calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -4px 18px rgba(36, 51, 41, .06); }
+.composer-inner { width: min(1040px, 100%); margin: 0 auto; }
+.composer-row { display: flex; gap: 8px; align-items: center; }
+.composer-row input { flex: 1 1 auto; min-width: 0; padding: 12px 14px; border-radius: 999px; font-size: 16px; /* 16px stops iOS zoom */ }
+.composer-row .btn { border-radius: 999px; min-width: 46px; height: 46px; padding: 0 14px; font-size: 18px; }
+.btn.mic.on { background: #b8452e; color: #fff; border-color: #b8452e; }
+.composer-chips { margin: 0 0 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.composer-chips::-webkit-scrollbar { display: none; }
+.composer-chips .chip { white-space: nowrap; cursor: pointer; border: 1px solid var(--line); }
+.composer-status { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: #eef2f5; color: #3a5563; font-size: 13px; }
+
+/* conversation bubbles */
+.chat-head { display: flex; justify-content: space-between; align-items: center; }
+.chat { display: flex; flex-direction: column; gap: 6px; max-height: 30vh; overflow-y: auto; padding: 4px 0 8px; }
+.bubble { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.bubble.you { align-self: flex-end; background: var(--ink); color: var(--paper); border-bottom-right-radius: 4px; }
+.bubble.daywell { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.bubble.undone { opacity: .55; text-decoration: line-through; }
+.bubble .undo { font-size: 12px; }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#52705c" />
-    <title>Daywell Planner</title>
+    <title>Daywell — your personal health agent</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -13,9 +13,9 @@
       <span class="brand">daywell<span>.</span></span>
       <nav class="nav" id="nav" aria-label="Sections">
         <button class="nav-btn" data-view="summary">Today</button>
-        <button class="nav-btn" data-view="log">Log</button>
+        <button class="nav-btn" data-view="log">History</button>
         <button class="nav-btn" data-view="plan">Plan</button>
-        <button class="nav-btn" data-view="setup">Setup &amp; Goals</button>
+        <button class="nav-btn" data-view="setup">Setup</button>
       </nav>
       <span id="save-state" class="save-state"></span>
     </header>
@@ -29,8 +29,10 @@
 
     <main id="view"></main>
 
+    <div id="composer" class="composer" aria-label="Message Daywell"></div>
+
     <div id="flash" class="flash" role="status" aria-live="polite"></div>
-    <footer>Local-first. Your movement plans, goals, and records stay in this browser on this device. No accounts, no uploads, no medical advice.</footer>
+    <footer>Local-first: your data stays in this browser on this device. Not medical advice — in a crisis, call your local emergency number.</footer>
 
     <script type="module" src="src/planner/app.js"></script>
   </body>

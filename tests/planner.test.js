@@ -513,9 +513,11 @@ test('81 answerQuery puts safety first and supports distress', async () => {
   const { answerQuery } = await import('../src/planner/ask.js');
   const s = stateWith((st) => { st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 6 }; });
   const iso = '2026-10-08';
-  const c = answerQuery(s, iso, 'I want to hurt myself', { name: 'Sasa' });
+  const c = answerQuery(s, iso, 'I want to hurt myself', { name: 'Sasa', region: 'TH' });
   assert.equal(c.safety, 'crisis');
-  assert.ok(/9 8 8/.test(c.reply) && /1 3 2 3/.test(c.reply), 'crisis reply includes hotlines');
+  assert.ok(/1 3 2 3/.test(c.reply), 'Thailand line');
+  assert.ok(/9 8 8/.test(answerQuery(s, iso, 'I want to hurt myself', { region: 'US' }).reply), 'US line');
+  assert.ok(/find a helpline/.test(answerQuery(s, iso, 'I want to hurt myself', {}).reply), 'unknown region → directory');
   assert.ok(!/not sure/i.test(c.reply));
   assert.equal(answerQuery(s, iso, 'I want to die, stop', {}).safety, 'crisis'); // beats "stop"
   const d = answerQuery(s, iso, 'I am feeling really anxious right now', {});
@@ -592,4 +594,64 @@ test('87 low mood prefers a saved music option', async () => {
   const r = analyze(s, '2026-10-08').recommendations[0];
   assert.equal(r.activity && r.activity.category, 'music');
   assert.ok(/mood is low/.test(r.rationale));
+});
+
+// ---- Seamless-agent round: region lines, conversational logging, learning, onboarding ----
+
+// 88. crisis lines follow the user's region; unknown region still gets help
+test('88 region-aware crisis resources', async () => {
+  const { regionFromLocale, crisisResources } = await import('../src/planner/safety.js');
+  assert.equal(regionFromLocale('th-TH'), 'TH');
+  assert.equal(regionFromLocale('th'), 'TH');
+  assert.equal(regionFromLocale('en-US'), 'US');
+  assert.equal(regionFromLocale('en-GB'), 'GB');
+  assert.equal(regionFromLocale('fr-FR'), null);
+  const th = crisisResources('TH').map((r) => r.detail).join(' ');
+  assert.ok(/1323/.test(th) && /emergency/i.test(th) && /findahelpline/.test(th));
+  const none = crisisResources(null);
+  assert.equal(none.length, 2); // emergency + directory, never empty
+});
+
+// 89. typing/talking naturally: plain statements log, bare durations amend
+test('89 conversational logging without trigger words', async () => {
+  const { answerQuery } = await import('../src/planner/ask.js');
+  const s = defaultState(); const iso = '2026-10-08';
+  const a = answerQuery(s, iso, '30 min walk', {});
+  assert.equal(a.action, 'log'); assert.equal(a.entry.durationMin, 30);
+  const y = answerQuery(s, iso, 'yoga', {});
+  assert.equal(y.action, 'log'); assert.ok(/How long/.test(y.reply));
+  const am = answerQuery(s, iso, '45 minutes', { lastEntry: { id: 'x', text: 'yoga' } });
+  assert.equal(am.action, 'amend'); assert.equal(am.durationMin, 45);
+  assert.notEqual(answerQuery(s, iso, '45 minutes', {}).action, 'log'); // no category → asks instead of guessing
+  assert.notEqual(answerQuery(s, iso, 'how many movement minutes?', {}).action, 'log');
+  assert.notEqual(answerQuery(s, iso, 'movement', {}).action, 'log');
+  assert.ok(/Anything else/.test(answerQuery(s, iso, 'thanks', {}).reply));
+});
+
+// 90. learns from behavior: the saved activity you actually do is suggested first
+test('90 suggestions prefer the activities you actually do', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = stateWith((st) => {
+    st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 6 };
+    st.library.activities = [lib({ id: 'q', category: 'meditation', title: 'Quick reset', durationMin: 3 }), lib({ id: 'b', category: 'meditation', title: 'Box breathing', durationMin: 5 })];
+    ensureDay(st, '2026-10-06').activityLog = [log({ category: 'meditation', text: 'Box breathing' }), log({ id: 'l2', category: 'meditation', text: 'Box breathing' })];
+  });
+  const r = analyze(s, '2026-10-08').recommendations.find((x) => x.side === 'mental');
+  assert.equal(r.activity.title, 'Box breathing'); // not the shorter, unused one
+});
+
+// 91. onboarding: starter library + status
+test('91 onboarding adds a balanced starter library once', async () => {
+  const { addStarterActivities, onboardingStatus, RECOMMENDED_GOALS, STARTER_ACTIVITIES } = await import('../src/planner/onboarding.js');
+  const s = defaultState();
+  assert.equal(onboardingStatus(s).remaining, 3);
+  assert.equal(addStarterActivities(s), STARTER_ACTIVITIES.length);
+  assert.equal(addStarterActivities(s), 0); // idempotent
+  for (const c of ['movement', 'meditation', 'winddown', 'music']) assert.ok(s.library.activities.some((a) => a.category === c), c);
+  assert.ok(RECOMMENDED_GOALS.movementMinutesPerWeek >= 150); // WHO floor
+  s.profile.name = 'Sasa'; s.profile.goalsSet = true;
+  assert.equal(onboardingStatus(s).show, false);
+  const v = validateState({ profile: { region: 'TH', goalsSet: true, onboardingDismissed: true } }).state.profile;
+  assert.equal(v.region, 'TH'); assert.equal(v.goalsSet, true); assert.equal(v.onboardingDismissed, true);
+  assert.equal(validateState({ profile: { region: 'nowhere' } }).state.profile.region, '');
 });

@@ -40,6 +40,9 @@ export function defaultState() {
     profile: {
       name: '',
       persona: 'companion',
+      region: '', // '' = auto from browser locale; used only to show the right crisis line
+      goalsSet: false, // the user has confirmed their weekly goals (onboarding)
+      onboardingDismissed: false,
       age: null,
       routine: { wake: null, workStart: null, workEnd: null, winddown: null, note: '' },
       goals: { movementSessionsPerWeek: 3, movementMinutesPerWeek: 90, mindfulnessSessionsPerWeek: 3 },
@@ -163,6 +166,9 @@ export function validateState(raw) {
     };
     base.profile.name = typeof p.name === 'string' ? p.name.trim().slice(0, 40) : '';
     base.profile.persona = (typeof p.persona === 'string' && p.persona) ? p.persona.slice(0, 20) : 'companion';
+    base.profile.region = (typeof p.region === 'string' && /^[A-Z]{2}$/.test(p.region)) ? p.region : '';
+    base.profile.goalsSet = p.goalsSet === true;
+    base.profile.onboardingDismissed = p.onboardingDismissed === true;
     base.profile.age = (Number.isFinite(p.age) && p.age >= 13 && p.age <= 120) ? Math.round(p.age) : null;
     base.profile.routine = validateRoutine(p.routine);
   }
