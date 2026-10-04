@@ -61,7 +61,7 @@ const cases = [
     has: ['Let’s get you set up', 'How are you feeling?', 'Do next', 'id="composer-input"', 'Good '], lacks: ['Uncaught'] },
   { name: 'returning user, low energy → greeting by name, adapted next step', view: 'today',
     state: base({ day: { checkin: { mood: 3, energy: 1, note: '', at: '' } } }),
-    has: ['Sasa', 'Adapted to your check-in', 'energy is low', 'class="ring', 'Healthy-aging guidelines', 'What you’ve done'], lacks: ['Let’s get you set up'] },
+    has: ['Sasa', 'Adapted to your mood &amp; energy', 'Based on your check-in', 'keeping it gentle', 'energy is low', 'class="ring', 'Healthy-aging guidelines', 'What you’ve done'], lacks: ['Let’s get you set up'] },
   { name: 'crisis in check-in note → support card + crisis line, no goal nudge', view: 'today',
     state: base({ profile: { region: 'TH' }, day: { checkin: { mood: 1, energy: 2, note: 'I feel hopeless', at: '' } } }),
     has: ['You don’t have to go through this alone', '1323', 'findahelpline.com', 'Breathe with me'], lacks: ['class="nudge '] },
