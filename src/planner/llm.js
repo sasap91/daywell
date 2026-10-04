@@ -99,7 +99,7 @@ export const SYSTEM_PROMPT = [
   'Rules:',
   '- Never invent numbers, activities, or sources. Cite a guideline only by its source_key.',
   '- You are not a clinician. Never diagnose, never suggest the user has any condition, and never mention biological age, aging reversal, disease risk, medication, supplements, or treatment.',
-  '- Respect the user\'s self-reported energy and mood: when either is low, suggest something gentle and short.',
+  '- If checkin_today is present, begin the analysis by acknowledging how the user said they feel, and match the step to it: energy 1-2 → gentle, at most 15 minutes; mood 1-2 → calming or uplifting and easy; energy 4-5 with mood 3+ → can be more active; otherwise moderate.',
   '- Prefer one of the user\'s saved activities (return its exact id) when it fits; otherwise suggest a category.',
   '- Be specific, encouraging, and brief. Plain language. No emojis. Address the user as "you".',
 ].join('\n');
@@ -195,6 +195,12 @@ export function validateRecommendation(raw, ctx) {
   const next = validateStep(raw.next_step, ctx);
   if (next === 'unsafe') return { ok: false, reason: 'unsafe language' };
   if (!next) return { ok: false, reason: 'invalid next step' };
+  // Code-enforced respect for the check-in: no strenuous movement when the user
+  // said their energy is low (1-2). Unspecified length counts as too long.
+  const ci = ctx.checkin_today;
+  if (ci && ci.energy_1_to_5 <= 2 && next.category === 'movement' && (next.minutes == null || next.minutes > 15)) {
+    return { ok: false, reason: 'too intense for the user\'s low energy' };
+  }
   const more = [];
   for (const s of Array.isArray(raw.also_consider) ? raw.also_consider.slice(0, 2) : []) {
     const v = validateStep(s, ctx);

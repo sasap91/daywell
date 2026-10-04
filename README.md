@@ -59,8 +59,16 @@ refresh, and bookmarks work. The message bar sits under all of them.
    recommended goals, and a starter activity library.
 3. **How are you feeling?** — one tap for mood, one for energy (emoji buttons); an
    optional note. Your own report, not an assessment.
-4. **Do next** — one evidence-anchored step with its cited source, adapted to your
-   check-in, and a **✓ I did it** button.
+4. **Do next** — one evidence-anchored step with its cited source and a **✓ I did
+   it** button, shaped by your mood × energy check-in (shown on the card):
+   - **Rest** (energy 1–2) → gentle and short (≤10 min); wind-down or mind first
+   - **Lift** (mood 1–2, energy 3+) → an easy mood-lift (your music first, or a short walk)
+   - **Push** (energy 4–5, mood 3+) → movement leads, up to ~45 min
+   - **Steady** (otherwise) → a manageable step (≤20 min)
+
+   Even when you're on track it adapts (unwind / lift your mood / optional bonus).
+   The optional AI must follow the same rule — code rejects strenuous movement
+   when you said you're drained.
 5. **Day / Week / Month** — progress rings with a **goal for each period**, derived
    from your weekly goals: a day's goal is today's share (150 min/week → 20 min
    today, at least 1 session), a month's scales to its days. Plus healthy-aging
@@ -210,7 +218,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # unit tests: node --test tests/*.test.js — 96 cases
+npm test                        # unit tests: node --test tests/*.test.js — 100 cases
 npm run smoke                   # headless-Chrome smoke test of the real UI (needs Chrome)
 ```
 

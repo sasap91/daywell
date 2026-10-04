@@ -438,8 +438,19 @@ function renderToday(root) {
   // instantly and remains the fallback — and stays visible for comparison.
   const ai = ensureAiRec(a);
   const aiReadyNow = Boolean(ai && ai.status === 'ready');
-  const rulesLabel = a.capacity === 'low' || a.capacity === 'high' ? 'Adapted to your check-in' : 'One step, matched to your goals';
+  const rulesLabel = a.checkin ? 'Adapted to your mood & energy' : 'One step, matched to your goals';
   const np = panel('Do next', aiReadyNow ? '✨ AI read · checked against your data' : rulesLabel);
+  // Make the check-in's influence explicit on the card itself.
+  if (a.checkin) {
+    const me = MOODS.find(([v]) => v === a.checkin.mood); const ee = ENERGY.find(([v]) => v === a.checkin.energy);
+    const modeText = { rest: 'keeping it gentle', lift: 'picking a mood-lift', push: 'aiming a bit higher', steady: 'keeping it manageable' }[a.checkin.mode];
+    np.append(el('div', { class: 'based-on' }, [
+      el('span', { text: `Based on your check-in: ${me ? me[1] : ''} ${a.checkin.moodWord} mood · ${ee ? ee[1] : ''} ${a.checkin.energyWord} energy` }),
+      el('span', { class: 'based-mode', text: modeText }),
+    ]));
+  } else {
+    np.append(el('div', { class: 'based-on empty' }, [el('span', { text: 'Tap how you feel above and this step will adapt to your mood and energy.' })]));
+  }
   if (aiReadyNow) np.append(el('p', { class: 'ai-analysis', text: ai.value.analysis }));
   if (ai && ai.status === 'loading') np.append(el('p', { class: 'muted small ai-status', text: '✨ Personalizing with AI… showing the standard step meanwhile.' }));
   if (ai && ai.status === 'error') np.append(el('p', { class: 'muted small ai-status', text: `AI unavailable — showing the standard recommendation. (${ai.error})` }));

@@ -17,6 +17,8 @@ export const GUIDES = {
   sleep: { text: 'Adults are advised to get 7+ hours of sleep per night on a regular basis.', source: 'CDC / American Academy of Sleep Medicine' },
 };
 const SLEEP_FLOOR = 7;
+const MOOD_WORDS = { 1: 'very low', 2: 'low', 3: 'okay', 4: 'good', 5: 'great' };
+const ENERGY_WORDS = { 1: 'drained', 2: 'tired', 3: 'steady', 4: 'good', 5: 'charged' };
 const MOVE_FLOOR = 150; // WHO weekly moderate-activity minimum
 const STRENGTH_FLOOR = 2; // WHO muscle-strengthening days/week
 const STRENGTH_RE = /strength|lift|weights?|resistance|pilates|squat|deadlift|push[- ]?up|pull[- ]?up|dumbbell|barbell|kettlebell/i;
@@ -165,31 +167,54 @@ export function analyze(state, iso) {
   const plural = wk.daysLeft !== 1 ? 's' : '';
 
   // Personalize to TODAY'S self-reported check-in (the user's own words, not an
-  // inference): low energy/mood → gentler options lead; good energy → movement.
+  // inference). Every check-in maps to a mode across the full mood × energy grid:
+  //   rest   — energy 1–2 (any mood): gentle and short; mind / wind-down lead
+  //   lift   — mood 1–2, energy 3+: an easy mood-lift (music first, short walk)
+  //   push   — energy 4–5 and mood 3+: movement leads, a bigger chunk
+  //   steady — everything else: a manageable, moderate step
   const ci = state.days[iso] && state.days[iso].checkin;
-  let capacity = 'unknown';
-  if (ci) capacity = (ci.energy <= 2 || ci.mood <= 2) ? 'low' : ((ci.energy >= 4 && ci.mood >= 3) ? 'high' : 'normal');
-  const lowWhat = ci && ci.energy <= 2 ? 'energy' : 'mood';
+  let mode = null;
+  if (ci) {
+    if (ci.energy <= 2) mode = 'rest';
+    else if (ci.mood <= 2) mode = 'lift';
+    else if (ci.energy >= 4) mode = 'push';
+    else mode = 'steady';
+  }
+  const capacity = !mode ? 'unknown' : ({ rest: 'low', lift: 'low', push: 'high', steady: 'normal' })[mode];
+  const moodWord = ci ? MOOD_WORDS[ci.mood] : null;
+  const energyWord = ci ? ENERGY_WORDS[ci.energy] : null;
+  const checkinNote = !mode ? '' : ({
+    rest: `You said your energy is low today (${energyWord}), so I've kept this gentle and short.`,
+    lift: `You said your mood is low today (${moodWord}) — something easy and uplifting can help, so I've picked a gentle mood-lift.`,
+    push: `You said you're feeling ${moodWord} with ${energyWord} energy — a good moment to make real progress.`,
+    steady: `You said you're feeling ${moodWord} with ${energyWord} energy, so here's a manageable step.`,
+  })[mode];
 
   if (deficit(mind) >= 0) {
     // Low self-reported mood → offer the user's own mood-lift (music) option first.
-    const act = pickSaved(capacity === 'low' && lowWhat === 'mood' ? ['music', 'meditation', 'winddown'] : ['meditation', 'winddown']);
+    const act = pickSaved(mode === 'lift' ? ['music', 'meditation', 'winddown'] : (mode === 'rest' ? ['winddown', 'meditation'] : ['meditation', 'winddown']));
     cands.push({ kind: 'mind', score: deficit(mind) + 0.01, side: 'mental',
-      title: act ? `Log “${act.title}” — a mind session` : 'Do a 10-min wind-down or meditation',
+      title: act ? `Log “${act.title}” — a mind session` : (mode === 'lift' ? 'Put on music you love for 10 minutes' : 'Do a 10-min wind-down or meditation'),
       rationale: `You've logged ${mind.done} of ${mind.target} mind sessions this week — about ${mind.behind} behind pace with ${wk.daysLeft} day${plural} left. ${GUIDES.mind.text}`,
-      source: GUIDES.mind.source, activity: act, addCat: act ? null : 'meditation' });
+      source: GUIDES.mind.source, activity: act, addCat: act ? null : (mode === 'lift' ? 'music' : 'meditation') });
   }
+  // Movement size follows the check-in: rest 10 · lift 15 · steady ≤20 · push ≤45 · no check-in ≤30.
+  const moveCap = { rest: 10, lift: 15, steady: 20, push: 45 }[mode] || 30;
+  const moveTitle = (act, chunk) => {
+    if (mode === 'rest') return act ? `Log “${act.title}” — keep it gentle (~${chunk} min)` : `Try a gentle ${chunk}-minute walk or stretch`;
+    if (mode === 'lift') return act ? `Log “${act.title}” — a short one (~${chunk} min) can lift your mood` : `A short ${chunk}-minute walk, outside if you can`;
+    return act ? `Log “${act.title}” (~${chunk} min)` : `Add about ${chunk} min of movement`;
+  };
   if (deficit(mmin) >= 0) {
-    const gentle = capacity === 'low';
-    const chunk = gentle ? 10 : Math.min(Math.max(10, mmin.behind), 30); const act = pickSaved(['movement']);
-    cands.push({ kind: 'move', score: deficit(mmin), side: 'physical',
-      title: gentle ? (act ? `Log “${act.title}” — keep it gentle (~10 min)` : 'Try a gentle 10-minute walk or stretch') : (act ? `Log “${act.title}” (~${chunk} min)` : `Add about ${chunk} min of movement`),
+    const chunk = (mode === 'rest' || mode === 'lift') ? moveCap : Math.min(Math.max(10, mmin.behind), moveCap);
+    const act = pickSaved(['movement']);
+    cands.push({ kind: 'move', score: deficit(mmin), side: 'physical', title: moveTitle(act, chunk),
       rationale: `You've logged ${mmin.done} of ${mmin.target} movement min this week — about ${mmin.behind} behind pace. ${GUIDES.moveMin.text}`,
       source: GUIDES.moveMin.source, activity: act, addCat: act ? null : 'movement' });
   } else if (deficit(msess) >= 0) {
     const act = pickSaved(['movement']);
     cands.push({ kind: 'move', score: deficit(msess), side: 'physical',
-      title: act ? `Log “${act.title}”` : (capacity === 'low' ? 'Try a gentle 10-minute walk' : 'Fit in a movement session'),
+      title: act ? `Log “${act.title}”` : moveTitle(null, (mode === 'rest' || mode === 'lift') ? moveCap : 20),
       rationale: `You've logged ${msess.done} of ${msess.target} movement sessions this week — about ${msess.behind} behind pace. ${GUIDES.moveMin.text}`,
       source: GUIDES.moveMin.source, activity: act, addCat: act ? null : 'movement' });
   }
@@ -200,12 +225,12 @@ export function analyze(state, iso) {
       source: GUIDES.sleep.source, activity: pickSaved(['winddown']), addCat: 'winddown' });
   }
   for (const c of cands) {
-    if (capacity === 'low' && (c.kind === 'mind' || c.kind === 'sleep')) c.score += 0.5;
-    if (capacity === 'high' && c.kind === 'move') c.score += 0.5;
+    if (mode === 'rest' && (c.kind === 'mind' || c.kind === 'sleep')) c.score += 0.5;
+    if (mode === 'lift') c.score += c.kind === 'mind' ? 0.5 : (c.kind === 'move' ? 0.25 : 0);
+    if (mode === 'push' && c.kind === 'move') c.score += 0.5;
   }
   cands.sort((a, b) => b.score - a.score);
-  if (cands[0] && capacity === 'low') cands[0].rationale = `You said your ${lowWhat} is low today, so I've kept this gentle. ${cands[0].rationale}`;
-  if (cands[0] && capacity === 'high' && cands[0].kind === 'move') cands[0].rationale = `You said you've got good energy today — a good moment to move. ${cands[0].rationale}`;
+  if (cands[0] && checkinNote) cands[0].rationale = `${checkinNote} ${cands[0].rationale}`;
 
   let recommendations;
   let status;
@@ -214,7 +239,20 @@ export function analyze(state, iso) {
     status = { tone: 'warn', label: 'No goals set yet — choose your weekly targets' };
   } else if (cands.length === 0) {
     const metCount = metrics.filter((m) => m.met).length;
-    recommendations = [{ side: 'ok', title: metCount === metrics.filter((m) => m.target > 0).length ? 'All your goals are met this week — keep your routine' : 'You’re on pace with your goals — keep your routine', rationale: metricsSummary(metrics), source: null, activity: null, addCat: null }];
+    const rec = { side: 'ok', title: metCount === metrics.filter((m) => m.target > 0).length ? 'All your goals are met this week — keep your routine' : 'You’re on pace with your goals — keep your routine', rationale: metricsSummary(metrics), source: null, activity: null, addCat: null };
+    // On track, the check-in still decides what fits today.
+    if (mode === 'rest') {
+      const act = pickSaved(['winddown', 'meditation']);
+      Object.assign(rec, { side: 'mental', title: act ? `You’re on track — unwind with “${act.title}”` : 'You’re on track — take it easy with a calm wind-down', activity: act, addCat: act ? null : 'winddown' });
+    } else if (mode === 'lift') {
+      const act = pickSaved(['music', 'meditation', 'winddown']);
+      Object.assign(rec, { side: 'mental', title: act ? `You’re on track — lift your mood with “${act.title}”` : 'You’re on track — lift your mood with music you love', activity: act, addCat: act ? null : 'music' });
+    } else if (mode === 'push') {
+      const act = pickSaved(['movement']);
+      Object.assign(rec, { side: 'physical', title: act ? `You’re on track — optional bonus: “${act.title}”` : 'You’re on track — an optional bonus walk while you’ve got the energy', activity: act, addCat: act ? null : 'movement' });
+    }
+    if (checkinNote) rec.rationale = `${checkinNote} ${rec.rationale}`;
+    recommendations = [rec];
     status = { tone: 'ok', label: metCount >= 2 ? 'On pace — goals on track this week' : 'On pace with your goals this week' };
   } else {
     recommendations = cands;
@@ -226,7 +264,8 @@ export function analyze(state, iso) {
   const guidelines = guidelineChecks(state, iso, wk);
   const guidelinesMet = guidelines.filter((g) => g.status === 'meets').length;
 
-  return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
+  const checkin = ci ? { mood: ci.mood, energy: ci.energy, moodWord, energyWord, mode } : null;
+  return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, checkin, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
 }
 
 // ---------- period goals: day / week / month have different targets ----------

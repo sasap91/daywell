@@ -801,3 +801,63 @@ test('100 periodMetrics: day counts today only; week unchanged', async () => {
   const month = Object.fromEntries(periodMetrics(s, '2026-10-08', 'month').map((m) => [m.key, m]));
   assert.equal(month.moveMin.done, 65); assert.equal(month.moveMin.target, 665);
 });
+
+// ---- Do next must reflect mood + energy for EVERY check-in ----
+const ciState = (goals, logs = []) => stateWith((st) => {
+  st.profile.goals = goals;
+  st.library.activities = [lib({ id: 'm', category: 'meditation', title: 'Box breathing', durationMin: 5 }), lib({ id: 'w', category: 'movement', title: 'Brisk walk', durationMin: 20 }), lib({ id: 'p', category: 'music', title: 'Upbeat playlist', durationMin: 10 }), lib({ id: 'r', category: 'winddown', title: 'Read before bed', durationMin: 15 })];
+  ensureDay(st, '2026-10-08').activityLog = logs;
+});
+const BEHIND = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 5 };
+const EASY = { movementSessionsPerWeek: 1, movementMinutesPerWeek: 10, mindfulnessSessionsPerWeek: 1 };
+const withCi = (s, mood, energy) => { s.days['2026-10-08'].checkin = mood ? { mood, energy, note: '', at: '' } : null; return s; };
+
+// 101. mid-range check-ins are no longer ignored
+test('101 a 3/3 or 4/3 check-in changes Do next vs no check-in', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const none = analyze(withCi(ciState(BEHIND), null), '2026-10-08');
+  const mid = analyze(withCi(ciState(BEHIND), 3, 3), '2026-10-08');
+  assert.equal(none.checkin, null);
+  assert.equal(mid.checkin.mode, 'steady');
+  assert.ok(/okay with steady energy/.test(mid.recommendations[0].rationale));
+  assert.notEqual(none.recommendations[0].rationale, mid.recommendations[0].rationale);
+  assert.equal(analyze(withCi(ciState(BEHIND), 4, 3), '2026-10-08').checkin.mode, 'steady');
+});
+
+// 102. the full grid → four modes with different steps and sizes
+test('102 mood × energy grid maps to rest / lift / push / steady', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const run = (m, e) => analyze(withCi(ciState(BEHIND), m, e), '2026-10-08');
+  assert.equal(run(4, 1).checkin.mode, 'rest'); // low energy wins regardless of mood
+  assert.equal(run(1, 4).checkin.mode, 'lift');
+  assert.equal(run(4, 5).checkin.mode, 'push');
+  assert.equal(run(1, 4).recommendations[0].activity.category, 'music');
+  assert.equal(run(4, 5).recommendations[0].side, 'physical');
+  assert.ok(/45 min|~/.test(run(4, 5).recommendations[0].title));
+  assert.equal(run(3, 2).recommendations[0].side, 'mental'); // tired → gentle
+});
+
+// 103. on track, the check-in still decides what fits today
+test('103 on-track Do next adapts to mood and energy', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const done = [log({ category: 'movement', durationMin: 20 }), log({ id: 'b', category: 'meditation' })];
+  const run = (m, e) => analyze(withCi(ciState(EASY, done), m, e), '2026-10-08').recommendations[0];
+  assert.ok(/unwind/.test(run(3, 1).title) && run(3, 1).activity);
+  assert.ok(/lift your mood/.test(run(1, 3).title));
+  assert.ok(/bonus/.test(run(4, 5).title) && run(4, 5).side === 'physical');
+  assert.ok(/keep your routine/.test(run(3, 3).title) && /okay with steady energy/.test(run(3, 3).rationale));
+  assert.ok(/keep your routine/.test(analyze(withCi(ciState(EASY, done), null), '2026-10-08').recommendations[0].title));
+});
+
+// 104. the AI is held to the check-in too
+test('104 AI output that ignores low energy is rejected', async () => {
+  const { validateRecommendation, buildContext } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = withCi(ciState(BEHIND), 3, 1);
+  const ctx = buildContext(s, '2026-10-08', analyze(s, '2026-10-08'));
+  const step = (category, minutes) => ({ analysis: 'You said you feel drained today.', next_step: { title: 'Go for it', why: 'Movement is behind.', category, activity_id: '', minutes, source_key: 'who_activity' }, also_consider: [] });
+  assert.equal(validateRecommendation(step('movement', 40), ctx).ok, false);
+  assert.equal(validateRecommendation(step('movement', 0), ctx).ok, false); // unspecified length counts as too long
+  assert.equal(validateRecommendation(step('movement', 10), ctx).ok, true);
+  assert.equal(validateRecommendation(step('meditation', 0), ctx).ok, true);
+});

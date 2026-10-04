@@ -284,3 +284,6 @@ body { padding-bottom: calc(var(--composer-h, 140px) + env(safe-area-inset-botto
 .bubble.thinking span { opacity: .6; font-style: italic; }
 .ai-preview { max-height: 260px; overflow: auto; font: 11.5px/1.45 var(--mono); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre; }
 .pace.open { background: #eef2f5; color: #3a5563; }
+.based-on { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; background: #eef3ea; color: var(--deep-sage); font-size: 13.5px; font-weight: 600; }
+.based-on.empty { background: var(--paper); border: 1px dashed var(--line); color: #6b7770; font-weight: 400; }
+.based-mode { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .04em; background: #fff; border-radius: 999px; padding: 2px 8px; }
