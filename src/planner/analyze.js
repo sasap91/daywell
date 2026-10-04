@@ -5,7 +5,7 @@
 // guidance (each cited), and never diagnoses, scores health, infers a mental
 // state, or estimates biological age.
 
-import { weekProgress, weekDates } from './goals.js';
+import { weekProgress, weekDates, monthDates } from './goals.js';
 import { suggestActivities } from './match.js';
 import { CATEGORIES } from './state.js';
 
@@ -227,4 +227,50 @@ export function analyze(state, iso) {
   const guidelinesMet = guidelines.filter((g) => g.status === 'meets').length;
 
   return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
+}
+
+// ---------- period goals: day / week / month have different targets ----------
+
+// Derives a period's targets from the user's WEEKLY goals. Day = today's share
+// (minutes rounded to 5; at least 1 session when a weekly goal exists, since a
+// session can't be split). Month = the week scaled to the month's length.
+export function periodTargets(goals, dimension = 'week', daysInPeriod = 7) {
+  const w = { sessions: goals.movementSessionsPerWeek, minutes: goals.movementMinutesPerWeek, mind: goals.mindfulnessSessionsPerWeek };
+  if (dimension === 'week') return { ...w };
+  const scale = dimension === 'day' ? 1 / 7 : daysInPeriod / 7;
+  const sess = (v) => (v > 0 ? Math.max(1, Math.round(v * scale)) : 0);
+  const mins = (v) => (v > 0 ? Math.max(5, Math.round((v * scale) / 5) * 5) : 0);
+  return { sessions: sess(w.sessions), minutes: mins(w.minutes), mind: sess(w.mind) };
+}
+
+// Ring metrics for a period, same shape as analyze().metrics. Week delegates to
+// analyze() unchanged. Day: no "pace" within a single day — met, or to go.
+// Month: pace by how far through the month we are.
+export function periodMetrics(state, iso, dimension = 'week') {
+  if (dimension === 'week') return analyze(state, iso).metrics;
+  const dates = dimension === 'day' ? [iso] : monthDates(iso);
+  let moveMin = 0; let moveSessions = 0; let mind = 0;
+  for (const dt of dates) {
+    for (const a of (state.days[dt] && state.days[dt].activityLog) || []) {
+      if (a.category === 'movement') { moveSessions += 1; moveMin += a.durationMin || 0; }
+      else if (CATEGORIES[a.category] && CATEGORIES[a.category].side === 'mental') mind += 1;
+    }
+  }
+  const t = periodTargets(state.profile.goals, dimension, dates.length);
+  const frac = dimension === 'day' ? 1 : (Math.max(0, dates.indexOf(iso)) + 1) / dates.length;
+  const cap = dimension === 'day' ? 'today’s share of your weekly goal' : `this month · ${dates.length} days`;
+  const mk = (key, side, label, done, target, guideCap) => {
+    const met = target > 0 && done >= target;
+    let status;
+    if (target <= 0) status = 'no-goal';
+    else if (met) status = 'met';
+    else if (dimension === 'day') status = 'open';
+    else { const exp = target * frac; status = done >= exp * 0.9 ? 'on-pace' : (done >= exp * 0.5 ? 'slightly-behind' : 'behind'); }
+    return { key, side, label, done, target, pct: target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0, met, status, behind: Math.max(0, Math.ceil(target * frac - done)), guideCap };
+  };
+  return [
+    mk('moveMin', 'physical', 'Movement minutes', moveMin, t.minutes, dimension === 'day' ? cap : `${cap} · WHO ≈150/wk`),
+    mk('moveSessions', 'physical', 'Movement sessions', moveSessions, t.sessions, cap),
+    mk('mind', 'mental', 'Mind sessions', mind, t.mind, cap),
+  ];
 }

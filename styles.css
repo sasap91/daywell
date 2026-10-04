@@ -283,3 +283,4 @@ body { padding-bottom: calc(var(--composer-h, 140px) + env(safe-area-inset-botto
 .ai-badge { font: 600 10px var(--mono); color: #5b4b8a; background: #ece7f8; border-radius: 999px; padding: 2px 7px; align-self: center; }
 .bubble.thinking span { opacity: .6; font-style: italic; }
 .ai-preview { max-height: 260px; overflow: auto; font: 11.5px/1.45 var(--mono); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre; }
+.pace.open { background: #eef2f5; color: #3a5563; }

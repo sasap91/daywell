@@ -771,3 +771,33 @@ test('98 AI config defaults off; ask.js marks fallback + next intents', async ()
   assert.equal(answerQuery(defaultState(), '2026-10-08', 'what should I do next', {}).intent, 'next');
   assert.notEqual(answerQuery(defaultState(), '2026-10-08', 'I want to hurt myself', {}).fallback, true); // safety never reaches AI
 });
+
+// 99. day / week / month goals differ, derived from the weekly goals
+test('99 periodTargets: day is a share of the week, month scales up', async () => {
+  const { periodTargets } = await import('../src/planner/analyze.js');
+  const g = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 5 };
+  assert.deepEqual(periodTargets(g, 'week'), { sessions: 4, minutes: 150, mind: 5 });
+  assert.deepEqual(periodTargets(g, 'day'), { sessions: 1, minutes: 20, mind: 1 }); // 150/7≈21 → 20; sessions ≥1
+  assert.deepEqual(periodTargets(g, 'month', 31), { sessions: 18, minutes: 665, mind: 22 });
+  assert.deepEqual(periodTargets({ movementSessionsPerWeek: 0, movementMinutesPerWeek: 0, mindfulnessSessionsPerWeek: 0 }, 'day'), { sessions: 0, minutes: 0, mind: 0 });
+});
+
+// 100. rings count only the period's logs against the period's target
+test('100 periodMetrics: day counts today only; week unchanged', async () => {
+  const { periodMetrics, analyze } = await import('../src/planner/analyze.js');
+  const s = stateWith((st) => {
+    st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 5 };
+    ensureDay(st, '2026-10-06').activityLog = [log({ category: 'movement', durationMin: 40 })];
+    ensureDay(st, '2026-10-08').activityLog = [log({ id: 'b', category: 'movement', durationMin: 25 }), log({ id: 'c', category: 'meditation' })];
+  });
+  const day = Object.fromEntries(periodMetrics(s, '2026-10-08', 'day').map((m) => [m.key, m]));
+  assert.equal(day.moveMin.done, 25); assert.equal(day.moveMin.target, 20); assert.equal(day.moveMin.status, 'met');
+  assert.equal(day.moveSessions.target, 1); assert.equal(day.mind.status, 'met');
+  const week = Object.fromEntries(periodMetrics(s, '2026-10-08', 'week').map((m) => [m.key, m]));
+  assert.equal(week.moveMin.done, 65); assert.equal(week.moveMin.target, 150);
+  assert.deepEqual(periodMetrics(s, '2026-10-08', 'week'), analyze(s, '2026-10-08').metrics);
+  const empty = periodMetrics(stateWith(() => {}), '2026-10-08', 'day');
+  assert.ok(empty.every((m) => m.status === 'open' && m.done === 0));
+  const month = Object.fromEntries(periodMetrics(s, '2026-10-08', 'month').map((m) => [m.key, m]));
+  assert.equal(month.moveMin.done, 65); assert.equal(month.moveMin.target, 665);
+});

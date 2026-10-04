@@ -9,7 +9,7 @@ import {
   loadState, saveState, clearState, exportState, ensureDay, todayIso,
   defaultState, validateState, uid, CATEGORIES, CATEGORY_KEYS,
 } from './state.js';
-import { analyze } from './analyze.js';
+import { analyze, periodMetrics } from './analyze.js';
 import { buildNudges } from './nudges.js';
 import { recap } from './recap.js';
 import { answerQuery } from './ask.js';
@@ -460,14 +460,16 @@ function renderToday(root) {
 
   // ---- Your week: rings, guidelines, what you've done, mood ----
   const rc = recap(state, iso, recapDim);
-  const dp = panel('Your week', 'Your logs vs your goals');
+  const periodTitle = { day: 'Today', week: 'Your week', month: 'This month' }[recapDim];
+  const periodStep = { day: 'Today vs your daily goal', week: 'Your logs vs your weekly goals', month: 'Your logs vs your monthly goals' }[recapDim];
+  const dp = panel(periodTitle, periodStep);
   const tools = el('div', { class: 'row wrap toggle' });
   for (const dmn of ['day', 'week', 'month']) tools.append(el('button', { class: `btn tiny ${recapDim === dmn ? 'primary' : ''}`, text: dmn[0].toUpperCase() + dmn.slice(1), 'aria-pressed': recapDim === dmn ? 'true' : 'false', onclick: () => { recapDim = dmn; render(); } }));
   if (ttsSupported()) tools.append(el('button', { class: 'btn tiny', text: '🔊 Listen', title: `Hear your ${recapDim} recap`, onclick: () => speak(rc.speech) }));
   dp.append(tools);
-  dp.append(el('div', { class: 'rings' }, a.metrics.map(ring)));
+  dp.append(el('div', { class: 'rings' }, periodMetrics(state, iso, recapDim).map(ring)));
 
-  dp.append(el('h3', { text: `Healthy-aging guidelines · ${a.guidelinesMet}/${a.guidelines.length} met` }));
+  dp.append(el('h3', { text: `Healthy-aging guidelines (this week) · ${a.guidelinesMet}/${a.guidelines.length} met` }));
   const gl = el('div', { class: 'list' });
   for (const g of a.guidelines) gl.append(el('div', { class: 'row wrap summary-line' }, [
     el('span', { class: 'grow', text: `${g.label} — ${g.detail}${g.note ? ` (${g.note})` : ''}` }),
@@ -570,7 +572,7 @@ function guidelineChip(status) {
 function paceLabel(m) {
   if (m.target <= 0) return 'no goal set';
   if (m.met) return 'met ✓';
-  return { 'on-pace': 'on pace', 'slightly-behind': 'a bit behind', behind: 'behind' }[m.status] || '';
+  return { 'on-pace': 'on pace', 'slightly-behind': 'a bit behind', behind: 'behind', open: `${Math.max(0, m.target - m.done)}${m.key === 'moveMin' ? ' min' : ''} to go today` }[m.status] || '';
 }
 function ring(m) {
   const color = m.side === 'mental' ? 'var(--yellow)' : 'var(--deep-sage)';

@@ -61,8 +61,11 @@ refresh, and bookmarks work. The message bar sits under all of them.
    optional note. Your own report, not an assessment.
 4. **Do next** — one evidence-anchored step with its cited source, adapted to your
    check-in, and a **✓ I did it** button.
-5. **Your week** — rings, healthy-aging guidelines, "what you've done" (incl. by
-   voice), mood sparkline, and a 🔊 recap for the day / week / month.
+5. **Day / Week / Month** — progress rings with a **goal for each period**, derived
+   from your weekly goals: a day's goal is today's share (150 min/week → 20 min
+   today, at least 1 session), a month's scales to its days. Plus healthy-aging
+   guidelines (weekly), "what you've done" (incl. by voice), a mood sparkline,
+   and a 🔊 recap of the selected period.
 
 ### History
 What you logged on the selected day (with remove), sleep & resting heart rate, and
@@ -207,7 +210,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # unit tests: node --test tests/*.test.js — 94 cases
+npm test                        # unit tests: node --test tests/*.test.js — 96 cases
 npm run smoke                   # headless-Chrome smoke test of the real UI (needs Chrome)
 ```
 
