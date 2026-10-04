@@ -13,7 +13,8 @@ or with Claude using your own API key.
 > **What Daywell will never do:** diagnose you, score your health, infer a mental
 > state, or estimate/claim a biological age. It reports *what you logged* and how
 > it tracks against *goals you set* and *general cited guidance* — nothing more.
-> These boundaries are enforced everywhere, including in voice mode. See
+> These boundaries are enforced everywhere — in voice mode and on everything the
+> optional AI writes, which code checks before you see it. See
 > [`docs/PRD_v2.2.md`](docs/PRD_v2.2.md) §R06 and §R12.
 
 ---
@@ -102,9 +103,11 @@ You:     breathe with me      →  a spoken one-minute box-breathing session, th
 You:     am I depressed?      →  honest refusal to assess — points you to a professional
 ```
 
-- **Deterministic, on-device intent** (`ask.js`) — not an LLM. Order of precedence:
-  **safety** (crisis → resources; distress → support) → **assessment boundary** →
-  log an activity → stats → next step → summaries.
+- **Rules first, AI second.** Every phrase goes through the deterministic intent
+  engine (`ask.js`) in this order: **safety** (crisis → resources; distress →
+  support) → **assessment boundary** → log an activity → stats → next step →
+  summaries. Only phrases the rules can't handle go to the **optional AI** (if
+  enabled) — never safety moments — and its reply is validated before it's spoken.
 - **Wake word** (`WAKE_RE` in `app.js`) via the Web Speech API — best-effort and
   browser-dependent; keeps the mic open while enabled (disclosed).
 - **Personas & TTS** — the browser's best available natural/neural voice, tuned per
