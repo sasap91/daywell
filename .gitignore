@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Logs / temp
+*.log
+.cache/
+
+# Personal data exports (never commit) — Daywell data is local-only
+*.pdf
+daywell-*.json
+export.xml

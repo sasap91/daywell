@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#52705c" />
+    <title>Daywell Planner</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip" href="#view">Skip to content</a>
+    <header class="appbar">
+      <span class="brand">daywell<span>.</span></span>
+      <nav class="nav" id="nav" aria-label="Sections">
+        <button class="nav-btn" data-view="summary">Today</button>
+        <button class="nav-btn" data-view="log">Log</button>
+        <button class="nav-btn" data-view="plan">Plan</button>
+        <button class="nav-btn" data-view="setup">Setup &amp; Goals</button>
+      </nav>
+      <span id="save-state" class="save-state"></span>
+    </header>
+
+    <div class="datebar">
+      <button id="date-prev" class="btn ghost" aria-label="Previous day">‹</button>
+      <input id="app-date" type="date" aria-label="Selected day" />
+      <button id="date-next" class="btn ghost" aria-label="Next day">›</button>
+      <span id="date-human" class="muted small"></span>
+    </div>
+
+    <main id="view"></main>
+
+    <div id="flash" class="flash" role="status" aria-live="polite"></div>
+    <footer>Local-first. Your movement plans, goals, and records stay in this browser on this device. No accounts, no uploads, no medical advice.</footer>
+
+    <script type="module" src="src/planner/app.js"></script>
+  </body>
+</html>

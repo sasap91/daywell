@@ -1,0 +1,12 @@
+{
+  "name": "daywell",
+  "version": "3.0.0",
+  "description": "Daywell — Late Meeting Recovery MVP. Local-first responsive web app.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 4173",
+    "serve": "python3 -m http.server 4173"
+  }
+}

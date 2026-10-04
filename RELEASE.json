@@ -1,0 +1,31 @@
+{
+  "product": "Daywell Personal Assistant",
+  "release": "7.1.0",
+  "schema": 7,
+  "generated": "2026-10-04T20:36:50.729Z",
+  "inputs": "meditation + activity (text/voice/upload), health facts (resting HR, sleep) via Apple Health export or manual entry",
+  "voice": "on-device deterministic parse (category + duration); no cloud AI",
+  "outputs": "descriptive health stats (own averages, day/week/month) + general cited healthy-aging info; check-in-driven suggestions",
+  "refused": "biological-age computation/lowering — no validated model from these inputs; would be fabricated. Stated plainly in-app.",
+  "model": "none",
+  "tests": "57 cases, all passing",
+  "hashes": {
+    "index.html": "3233eb7b5ed79bc5",
+    "styles.css": "6e3c06678c8f2ed8",
+    "src/dom.js": "34ed9f6b0abb15a6",
+    "src/time.js": "8c93ccddd36a4fb2",
+    "src/supervisor.js": "cfb4949d62788cde",
+    "src/connectors.js": "61cb8cea9673dfb7",
+    "src/skills/ics.js": "342920a74468b372",
+    "src/planner/state.js": "eeb9a4da29842937",
+    "src/planner/goals.js": "284056667ca5de49",
+    "src/planner/match.js": "3d342103c0b5ff96",
+    "src/planner/assistant.js": "27ca5e969381a80a",
+    "src/planner/recovery.js": "b6d92a3454de4223",
+    "src/planner/ingest.js": "65c5165828b6962f",
+    "src/planner/parse.js": "0f48270181c26053",
+    "src/planner/evidence.js": "aacfb9d6edc5be17",
+    "src/planner/voice.js": "60cf6ed34d53482b",
+    "src/planner/app.js": "3793cc17261f35b7"
+  }
+}
