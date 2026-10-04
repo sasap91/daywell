@@ -1,11 +1,12 @@
 {
   "name": "daywell",
-  "version": "8.0.0",
+  "version": "8.1.0",
   "description": "Daywell — local-first personal health agent for physical and mental wellbeing.",
   "type": "module",
   "private": true,
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "smoke": "node tests/smoke/run.mjs",
     "start": "python3 -m http.server 4173",
     "serve": "python3 -m http.server 4173"
   }

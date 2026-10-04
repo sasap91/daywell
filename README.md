@@ -19,60 +19,62 @@ no cloud AI.
 
 ## Highlights
 
-- 🛟 **Safety first** — if your own words (voice, check-in note, or log) signal
-  crisis, Daywell stops everything else and shows crisis lines (US 988, Thailand
-  1323, findahelpline.com) in a calm voice. Distress ("I'm so anxious") gets
-  support, not a refusal.
+- 💬 **One message bar, everywhere** — at the bottom of every page: type *or* tap
+  🎤 and just say what you did ("30 min walk", "yoga" → "how long?" → "45 minutes")
+  or ask ("how's my week?"). Logging is instant with **Undo** — no forms, no
+  confirm dialogs.
+- 🛟 **Safety first** — if your own words (typed, spoken, or in a check-in note)
+  signal crisis, Daywell pauses everything else and shows the crisis line for
+  **your region** (US/Canada 988, UK & Ireland 116 123, Australia 13 11 14,
+  Thailand 1323 — or the global directory) in a calm voice. Distress ("I'm so
+  anxious") gets support, not a refusal.
 - 🫁 **Guided breathing** — "breathe with me" (or one tap) runs a spoken one-minute
   box-breathing exercise and logs it. The agent *acts*, not just suggests.
-- 🎙️ **Speech-to-speech voice companion** — say **"Hey Daywell"**, get greeted by
-  name, then **log, summarize (day/week/month), and ask what to do next** — all by
-  voice. Answers come only from your own data.
-- 🎭 **Voice personas** — Companion, Coach, or Calm guide: each changes the wording
-  *and* the speech delivery (rate/pitch).
-- 🎉 **Goal-reached chime** — a short Web Audio fanfare plays when you cross a goal.
-- 📊 **Analytical dashboard** — progress rings vs your goals **and** a second layer
-  vs healthy-aging guidelines (WHO / CDC / NCCIH), with one prioritized next step.
-- ⏰ **Time-of-day triggers** — nudges the right activity for the moment (move in the
-  morning, wind down at night) from your stated routine.
-- 🔒 **Local-first & private** — browser `localStorage` only; export/import is a
-  backup, not a sync. No telemetry.
+- 🎯 **Personalized next step** — adapts to your one-tap check-in, your calendar
+  (never mid-meeting), your routine, and **what you actually do** (your
+  most-used activities are suggested first).
+- 🎙️ **Speech-to-speech companion** — "Hey Daywell" (opt-in) → greeted by name, with
+  voice personas (Companion, Coach, Calm guide) and a goal-reached chime.
+- 📊 **Honest dashboard** — progress rings vs your goals **and** vs healthy-aging
+  guidelines (WHO / CDC / NCCIH).
+- 🔒 **Local-first & private** — browser `localStorage` only; no account, no server,
+  no telemetry.
 
 ---
 
 ## The views
 
-### Today
-- **Talk to Daywell** — the voice companion (see below).
-- **Check-in** — a 20-second mood + energy self-report (your words, not an
-  assessment).
-- **Your week** — a status line, three **progress rings** (movement minutes,
-  movement sessions, mind sessions) vs *your goals*, a **"vs healthy-aging
-  guidelines"** layer, a **mood sparkline**, a **🔊 Listen** recap readback, and a
-  **"What you've done"** list showing which entries you logged by voice.
-- **Do next** — one prioritized, **evidence-anchored** recommendation (with its
-  cited source) plus actions to log or plan it.
+Every tab has its own URL (`#today`, `#history`, `#plan`, `#setup`), so back,
+refresh, and bookmarks work. The message bar sits under all of them.
 
-### Log
-- One seamless input for **text, voice, and manual** entry. Typing, tapping an
-  example, or speaking all flow through the same on-device parse + confirm.
-- **Deterministic parsing** (`parse.js`): categories by keyword, durations from
-  digits *or* spelled-out numbers ("ten minutes", "half an hour"); stray numbers
-  ("ran 5k") are deliberately **not** read as a duration.
-- **File import**: movement JSON/CSV, or Apple Health `export.xml` (workouts +
-  resting HR + sleep), filed by their own dates.
+### Today
+1. **Greeting** — "Good evening, Sasa" with one line on how your week is going
+   (new users get a welcome, not a grade).
+2. **First-run setup** (until done) — three one-tap steps: your name, WHO-aligned
+   recommended goals, and a starter activity library.
+3. **How are you feeling?** — one tap for mood, one for energy (emoji buttons); an
+   optional note. Your own report, not an assessment.
+4. **Do next** — one evidence-anchored step with its cited source, adapted to your
+   check-in, and a **✓ I did it** button.
+5. **Your week** — rings, healthy-aging guidelines, "what you've done" (incl. by
+   voice), mood sparkline, and a 🔊 recap for the day / week / month.
+
+### History
+What you logged on the selected day (with remove), sleep & resting heart rate, and
+file import (Apple Health `export.xml`, movement JSON/CSV). Logging itself happens
+in the message bar.
 
 ### Plan
-- Plan activities around your commitments; **recover** when something can't happen
-  (rain → indoor option in a real free window; a missed session → an anytime
-  fallback).
+Plan activities around your commitments; **recover** when something can't happen
+(rain → indoor option in a real free window; a missed session → an anytime
+fallback).
 
 ### Setup
-- **About you** — name, age, and **routine** times (wake / work / wind-down) that
-  power the time-of-day triggers.
-- **Voice persona & sound** — pick a persona, preview it, toggle the goal chime.
-- **Weekly goals**, **activity library**, **work calendar (`.ics`)**, **Apple
-  Health** import recipe, **reminders**, and **export / import / delete**.
+**About you** (name, age, routine, region for support lines), **Voice** (persona,
+"Hey Daywell", goal chime), **weekly goals** (with a one-tap recommended
+option), **activity library** (with starter activities), **work calendar
+(`.ics`)**, **Apple Health** recipe, **reminders**, and **export / import /
+delete**.
 
 ---
 
@@ -112,7 +114,7 @@ You:     am I depressed?      →  honest refusal to assess — points you to a 
 
 | Your words signal | Daywell does |
 | --- | --- |
-| **Crisis** (self-harm, suicidal thoughts, hopelessness) | Warm, direct reply + crisis lines; a support card on every page; calm voice regardless of persona; goal nudges paused; crisis text is never filed as an "activity" |
+| **Crisis** (self-harm, suicidal thoughts, hopelessness) | Warm, direct reply + the crisis line for your region (set in Setup, or auto-detected from the browser; unknown → findahelpline.com); a support card on every page; calm voice regardless of persona; goal nudges paused; crisis text is never filed as an "activity" |
 | **Distress** (anxious, stressed, overwhelmed, can't sleep) | Support + an offer of guided breathing; a gentle support card |
 | **A request to assess you** ("am I depressed?") | Honest refusal to diagnose, with a pointer to a professional |
 
@@ -171,7 +173,8 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # node --test tests/*.test.js — 83 cases
+npm test                        # unit tests: node --test tests/*.test.js — 87 cases
+npm run smoke                   # headless-Chrome smoke test of the real UI (needs Chrome)
 ```
 
 No build step, no dependencies — plain ES modules, vanilla JS, one CSS file.
@@ -191,7 +194,9 @@ notifications) are thin, feature-detected wrappers.
 | Analytical engine (rings, guidelines, next step) | `src/planner/analyze.js` |
 | Proactive nudges + time-of-day triggers | `src/planner/nudges.js` |
 | Recap ("what you've done", spoken) | `src/planner/recap.js` |
-| Safety layer (crisis / distress / guided breathing) | `src/planner/safety.js` |
+| Safety layer (crisis / distress / region lines / breathing) | `src/planner/safety.js` |
+| First-run setup, starter library, recommended goals | `src/planner/onboarding.js` |
+| UI smoke test (headless Chrome) | `tests/smoke/run.mjs` |
 | Voice Q&A / command intent (deterministic) | `src/planner/ask.js` |
 | Voice personas (characters) | `src/planner/persona.js` |
 | On-device text/voice parsing | `src/planner/parse.js` |

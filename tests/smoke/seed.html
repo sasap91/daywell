@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Daywell smoke seed</title>
+<script>
+  // Seeds localStorage from the URL hash, then opens the real app.
+  // #<base64 JSON {state, view}> — used only by tests/smoke/run.mjs.
+  const payload = JSON.parse(atob(decodeURIComponent(location.hash.slice(1))));
+  localStorage.clear();
+  if (payload.state) localStorage.setItem('daywell.app.v7', JSON.stringify(payload.state));
+  location.replace(`/index.html#${payload.view || 'today'}`);
+</script>
