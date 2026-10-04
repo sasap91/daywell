@@ -125,9 +125,12 @@ export function analyze(state, iso) {
   };
 
   const anyGoal = metrics.some((m) => m.target > 0);
+  // First saved activity in the PREFERRED category order (suggestActivities sorts
+  // by duration only, which would otherwise ignore the preference).
   const pickSaved = (cats) => {
-    const r = suggestActivities(state, iso, { categories: cats });
-    return r.suggestions && r.suggestions[0] ? r.suggestions[0].activity : null;
+    const sug = suggestActivities(state, iso, { categories: cats }).suggestions || [];
+    for (const c of cats) { const m = sug.find((x) => x.activity.category === c); if (m) return m.activity; }
+    return null;
   };
 
   // Rank behind-pace metrics; the furthest behind (relative to its goal) is the
@@ -137,33 +140,48 @@ export function analyze(state, iso) {
   const cands = [];
   const plural = wk.daysLeft !== 1 ? 's' : '';
 
+  // Personalize to TODAY'S self-reported check-in (the user's own words, not an
+  // inference): low energy/mood → gentler options lead; good energy → movement.
+  const ci = state.days[iso] && state.days[iso].checkin;
+  let capacity = 'unknown';
+  if (ci) capacity = (ci.energy <= 2 || ci.mood <= 2) ? 'low' : ((ci.energy >= 4 && ci.mood >= 3) ? 'high' : 'normal');
+  const lowWhat = ci && ci.energy <= 2 ? 'energy' : 'mood';
+
   if (deficit(mind) >= 0) {
-    const act = pickSaved(['meditation', 'winddown']);
-    cands.push({ score: deficit(mind) + 0.01, side: 'mental',
+    // Low self-reported mood → offer the user's own mood-lift (music) option first.
+    const act = pickSaved(capacity === 'low' && lowWhat === 'mood' ? ['music', 'meditation', 'winddown'] : ['meditation', 'winddown']);
+    cands.push({ kind: 'mind', score: deficit(mind) + 0.01, side: 'mental',
       title: act ? `Log “${act.title}” — a mind session` : 'Do a 10-min wind-down or meditation',
       rationale: `You've logged ${mind.done} of ${mind.target} mind sessions this week — about ${mind.behind} behind pace with ${wk.daysLeft} day${plural} left. ${GUIDES.mind.text}`,
       source: GUIDES.mind.source, activity: act, addCat: act ? null : 'meditation' });
   }
   if (deficit(mmin) >= 0) {
-    const chunk = Math.min(Math.max(10, mmin.behind), 30); const act = pickSaved(['movement']);
-    cands.push({ score: deficit(mmin), side: 'physical',
-      title: act ? `Log “${act.title}” (~${chunk} min)` : `Add about ${chunk} min of movement`,
+    const gentle = capacity === 'low';
+    const chunk = gentle ? 10 : Math.min(Math.max(10, mmin.behind), 30); const act = pickSaved(['movement']);
+    cands.push({ kind: 'move', score: deficit(mmin), side: 'physical',
+      title: gentle ? (act ? `Log “${act.title}” — keep it gentle (~10 min)` : 'Try a gentle 10-minute walk or stretch') : (act ? `Log “${act.title}” (~${chunk} min)` : `Add about ${chunk} min of movement`),
       rationale: `You've logged ${mmin.done} of ${mmin.target} movement min this week — about ${mmin.behind} behind pace. ${GUIDES.moveMin.text}`,
       source: GUIDES.moveMin.source, activity: act, addCat: act ? null : 'movement' });
   } else if (deficit(msess) >= 0) {
     const act = pickSaved(['movement']);
-    cands.push({ score: deficit(msess), side: 'physical',
-      title: act ? `Log “${act.title}”` : 'Fit in a movement session',
+    cands.push({ kind: 'move', score: deficit(msess), side: 'physical',
+      title: act ? `Log “${act.title}”` : (capacity === 'low' ? 'Try a gentle 10-minute walk' : 'Fit in a movement session'),
       rationale: `You've logged ${msess.done} of ${msess.target} movement sessions this week — about ${msess.behind} behind pace. ${GUIDES.moveMin.text}`,
       source: GUIDES.moveMin.source, activity: act, addCat: act ? null : 'movement' });
   }
   if (sleep.below) {
-    cands.push({ score: 0.35, side: 'physical',
+    cands.push({ kind: 'sleep', score: 0.35, side: 'physical',
       title: 'Aim for an earlier wind-down tonight',
       rationale: `Your sleep is averaging ${sleep.avg} h over ${sleep.nights} night${sleep.nights !== 1 ? 's' : ''}; guidance suggests ${SLEEP_FLOOR}+. An earlier wind-down may help.`,
       source: GUIDES.sleep.source, activity: pickSaved(['winddown']), addCat: 'winddown' });
   }
+  for (const c of cands) {
+    if (capacity === 'low' && (c.kind === 'mind' || c.kind === 'sleep')) c.score += 0.5;
+    if (capacity === 'high' && c.kind === 'move') c.score += 0.5;
+  }
   cands.sort((a, b) => b.score - a.score);
+  if (cands[0] && capacity === 'low') cands[0].rationale = `You said your ${lowWhat} is low today, so I've kept this gentle. ${cands[0].rationale}`;
+  if (cands[0] && capacity === 'high' && cands[0].kind === 'move') cands[0].rationale = `You said you've got good energy today — a good moment to move. ${cands[0].rationale}`;
 
   let recommendations;
   let status;
@@ -184,5 +202,5 @@ export function analyze(state, iso) {
   const guidelines = guidelineChecks(state, iso, wk);
   const guidelinesMet = guidelines.filter((g) => g.status === 'meets').length;
 
-  return { status, metrics, guidelines, guidelinesMet, sleep, mood, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
+  return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
 }

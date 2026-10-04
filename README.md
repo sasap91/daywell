@@ -19,6 +19,12 @@ no cloud AI.
 
 ## Highlights
 
+- 🛟 **Safety first** — if your own words (voice, check-in note, or log) signal
+  crisis, Daywell stops everything else and shows crisis lines (US 988, Thailand
+  1323, findahelpline.com) in a calm voice. Distress ("I'm so anxious") gets
+  support, not a refusal.
+- 🫁 **Guided breathing** — "breathe with me" (or one tap) runs a spoken one-minute
+  box-breathing exercise and logs it. The agent *acts*, not just suggests.
 - 🎙️ **Speech-to-speech voice companion** — say **"Hey Daywell"**, get greeted by
   name, then **log, summarize (day/week/month), and ask what to do next** — all by
   voice. Answers come only from your own data.
@@ -84,17 +90,34 @@ Daywell: Nice — here's how this week looks. You logged 3 activities … 2 by v
          On tracking, 3 goals behind pace. You're meeting 1 of 4 healthy-aging
          guidelines.
 You:     switch to day        →  re-reads today's recap
-You:     what should I do next →  the time-aware next step
-You:     how's my mental health →  (honest refusal — points you to a clinician)
+You:     what should I do next →  the time-aware, calendar-aware next step
+You:     I'm feeling really anxious →  support + offer of guided breathing
+You:     breathe with me      →  a spoken one-minute box-breathing session, then logs it
+You:     am I depressed?      →  honest refusal to assess — points you to a professional
 ```
 
-- **Deterministic, on-device intent** (`ask.js`) — not an LLM. It routes a phrase
-  to: log an activity, summarize a period, give the next step, answer a stat, or
-  refuse a health-judgment question.
+- **Deterministic, on-device intent** (`ask.js`) — not an LLM. Order of precedence:
+  **safety** (crisis → resources; distress → support) → **assessment boundary** →
+  log an activity → stats → next step → summaries.
 - **Wake word** (`WAKE_RE` in `app.js`) via the Web Speech API — best-effort and
   browser-dependent; keeps the mic open while enabled (disclosed).
 - **Personas & TTS** — the browser's best available natural/neural voice, tuned per
   persona. Quality depends on the browser/OS.
+
+---
+
+## Safety layer
+
+`safety.js` runs **before** any other interpretation of what you say or write:
+
+| Your words signal | Daywell does |
+| --- | --- |
+| **Crisis** (self-harm, suicidal thoughts, hopelessness) | Warm, direct reply + crisis lines; a support card on every page; calm voice regardless of persona; goal nudges paused; crisis text is never filed as an "activity" |
+| **Distress** (anxious, stressed, overwhelmed, can't sleep) | Support + an offer of guided breathing; a gentle support card |
+| **A request to assess you** ("am I depressed?") | Honest refusal to diagnose, with a pointer to a professional |
+
+Daywell is **not a crisis service** — its job here is to make sure you're pointed to
+one, every time, instead of a "not sure on that one" fallback.
 
 ---
 
@@ -113,7 +136,16 @@ logged behavior to:
    - Sleep — **CDC / AASM** 7+ h/night
    - Stress-reduction practice — **US NCCIH**
 
-The furthest-behind item becomes your **next step**, carrying its cited source.
+The furthest-behind item becomes your **next step**, carrying its cited source —
+then it's **personalized to today**:
+
+- **Your check-in** — low self-reported energy or mood → gentler options lead (low
+  mood surfaces your own music/mood-lift activity); good energy → movement leads.
+  The reason is stated ("You said your energy is low today, so I've kept this
+  gentle"). This uses your own report — it never infers your state.
+- **Your calendar** — no activity prompts during an imported commitment ("You're in
+  Board meeting until 14:00 — I'll hold suggestions till then").
+- **Your routine** — time-of-day triggers (move in the morning, wind down at night).
 Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 
 > This is general guidance matched to your own goals — **not** medical advice, a
@@ -139,7 +171,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # node --test tests/*.test.js — 79 cases
+npm test                        # node --test tests/*.test.js — 83 cases
 ```
 
 No build step, no dependencies — plain ES modules, vanilla JS, one CSS file.
@@ -159,6 +191,7 @@ notifications) are thin, feature-detected wrappers.
 | Analytical engine (rings, guidelines, next step) | `src/planner/analyze.js` |
 | Proactive nudges + time-of-day triggers | `src/planner/nudges.js` |
 | Recap ("what you've done", spoken) | `src/planner/recap.js` |
+| Safety layer (crisis / distress / guided breathing) | `src/planner/safety.js` |
 | Voice Q&A / command intent (deterministic) | `src/planner/ask.js` |
 | Voice personas (characters) | `src/planner/persona.js` |
 | On-device text/voice parsing | `src/planner/parse.js` |
@@ -184,4 +217,5 @@ Product requirements and the evaluation that shaped these boundaries are in
 - **No health claims** — no diagnosis, disease-risk prediction, biological age,
   calorie/nutrition math, or mental-health inference. Health-judgment questions get
   an honest refusal and a pointer to a qualified professional.
+- **Not a crisis service** — crisis language always surfaces crisis lines first.
 - Export/import is a **backup**, not a sync. Deleting clears this device only.

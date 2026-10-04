@@ -2,17 +2,21 @@
 // phrase to an answer built ONLY from the user's own logs, goals, and cited
 // guidelines (via recap/analyze/nudges). No cloud model, no free-form generation.
 //
-// Hard boundary: questions that ask the app to judge the user's health, mental
-// state, or biological age get an honest refusal + a pointer to a clinician —
-// never an assessment (R06/R12).
+// Order of precedence: SAFETY first (crisis → resources; distress → support +
+// guided breathing), then the assessment boundary (requests to judge the user's
+// health, mental state, or biological age get an honest refusal — R06/R12),
+// then logging, stats, summaries, and next steps.
 
 import { recap } from './recap.js';
 import { analyze } from './analyze.js';
 import { buildNudges } from './nudges.js';
 import { parseSpoken, detectCategories } from './parse.js';
 import { getPersona, pick } from './persona.js';
+import { detectCrisis, detectDistress, crisisReply, distressReply } from './safety.js';
 
-const BOUNDARY = /(biological age|mental health|how healthy|am i healthy|how am i mentally|mentally|depress|anxiet|diagnos|disease|cancer|medication|should i take|is it normal)/i;
+// Requests for an ASSESSMENT (as opposed to telling us how they feel).
+const BOUNDARY = /(biological age|mental health|how healthy|am i healthy|how am i mentally|\bmentally\b|am i (depressed|anxious|sick|ill|normal)|do i have|diagnos|disease|cancer|medication|should i take|is it normal)/i;
+const BREATHE = /(breathe with me|breathing exercise|guide me|help me (calm|relax|breathe)|calm me down|let'?s breathe|box breathing now|start breathing)/i;
 
 const LOG_TRIGGER = /^(log|add|record)\b|\bi (just )?(did|went for|finished|completed|had|took|got in|wrapped up|knocked out|logged)\b|\blog (that|this|it)\b|^(went for|finished|completed) /i;
 
@@ -31,9 +35,14 @@ export function answerQuery(state, iso, text, ctx = {}) {
   const wantedDim = dimFrom(t);
   if (!t) return { reply: 'I didn’t catch that. Try “how’s my week” or “what should I do next”.' };
 
+  // 1. Safety always wins — even over "stop".
+  if (detectCrisis(t)) return { reply: crisisReply(ctx.name), safety: 'crisis' };
+  if (BREATHE.test(t)) return { reply: 'Okay, let’s do it.', action: 'breathe' };
+  if (detectDistress(t)) return { reply: distressReply(ctx.name), safety: 'distress' };
+
   if (/\b(stop|exit|quit|cancel|never mind|that'?s all|goodbye|bye)\b/.test(t)) return { reply: 'Okay, stopping voice mode.', stop: true };
   if (/(what can you|what do you do|^help$|how do i use|what can i ask)/.test(t)) {
-    return { reply: 'Lots! Ask me how your week’s going, switch between day, week, and month, ask what you did, or what to do next. I only read your own logs and goals.' };
+    return { reply: 'Lots! Tell me what you did and I’ll log it, ask how your day, week, or month is going, or what to do next. Say “breathe with me” any time for a guided minute of calm. I only read your own logs and goals.' };
   }
   if (BOUNDARY.test(t)) {
     return { reply: 'I can’t assess your health, your mental state, or a biological age — that needs a clinician, not an app, and I only track what you log. If something is weighing on you, talking to someone you trust or a professional is worth it. I can tell you what you’ve logged and how it’s tracking against your goals.' };

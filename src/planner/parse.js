@@ -2,22 +2,21 @@
 // Deterministic keyword + duration extraction — no cloud AI, nothing leaves the
 // device. The result is a PROPOSAL: the user reviews/edits it before saving.
 
-const CATEGORY_KEYWORDS = [
-  ['meditation', ['meditat', 'breath', 'mindful', 'box breathing', 'pranayama']],
-  ['winddown', ['wind down', 'wind-down', 'winddown', 'relax', 'stretch', 'bath', 'shower', 'read', 'journal', 'tea', 'rest', 'nap']],
-  ['music', ['music', 'playlist', 'song', 'listen']],
-  ['movement', ['walk', 'run', 'jog', 'gym', 'workout', 'work out', 'exercise', 'yoga', 'cycle', 'bike', 'swim', 'strength', 'hike', 'pilates', 'row', 'cardio', 'lift']],
+// Whole-word patterns (with common inflections). Substring matching caused real
+// mislogs — "team" matched "tea", "tomorrow" matched "row", "brunch" matched
+// "run" — so every keyword is anchored on word boundaries.
+const CATEGORY_PATTERNS = [
+  ['meditation', /\b(meditat\w*|breath\w*|mindful\w*|pranayama)\b/i],
+  ['winddown', /\b(wind[\s-]?down|relax\w*|stretch\w*|bath|baths|bathed|shower\w*|read|reading|journal\w*|tea|rest|rested|resting|nap|naps|napped|napping)\b/i],
+  ['music', /\b(music|playlists?|songs?|listen\w*)\b/i],
+  ['movement', /\b(walk\w*|run|runs|running|ran|jog\w*|gym|workouts?|work(ed|ing)?\s+out|exercis\w*|yoga|cycl\w*|bik(e|es|ed|ing)|swim\w*|swam|strength|hik(e|es|ed|ing)|pilates|row|rows|rowed|rowing|cardio|lift\w*|weights|squats?|deadlifts?|danc\w*|tennis|football|soccer|basketball|badminton|climb\w*)\b/i],
 ];
 
 // Every category whose keywords appear, in priority order. The first is the
 // primary; extras let the UI flag a mixed entry ("looks like two activities").
 export function detectCategories(text) {
-  const t = String(text || '').toLowerCase();
-  const found = [];
-  for (const [cat, words] of CATEGORY_KEYWORDS) {
-    if (words.some((w) => t.includes(w))) found.push(cat);
-  }
-  return found;
+  const t = String(text || '');
+  return CATEGORY_PATTERNS.filter(([, re]) => re.test(t)).map(([cat]) => cat);
 }
 
 export function detectCategory(text) {

@@ -132,7 +132,15 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--deep-
 .nudge-goal { background: #fbf1e3; border-color: #ecd9bb; color: #8a5a1e; }
 .nudge-checkin { background: #eef3ea; border-color: #d3e0cd; color: var(--deep-sage); }
 .nudge-setup { background: var(--cream); border-color: var(--line); color: var(--ink); }
-.nudge-time { background: #eef2f5; border-color: #cdd9e0; color: #3a5563; }
+.nudge-time, .nudge-busy { background: #eef2f5; border-color: #cdd9e0; color: #3a5563; }
+
+/* ---- safety support card ---- */
+.support h2 { font-size: 20px; }
+.support p { margin: 0 0 10px; }
+.support-distress { border-left: 4px solid var(--yellow); background: #fffaf0; }
+.support-crisis { border: 2px solid #b8452e; border-left-width: 6px; background: #fff4f0; }
+.support-list { margin: 0 0 12px; padding-left: 20px; }
+.support-list li { margin: 4px 0; }
 .nudge .btn.ghost { font-size: 18px; padding: 2px 8px; margin-left: auto; }
 
 /* ---- analytical dashboard ---- */

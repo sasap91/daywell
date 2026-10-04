@@ -40,9 +40,14 @@ export function buildNudges(state, iso, nowMin = null) {
     list.push({ kind: 'setup', text: 'Set your weekly goals so Daywell can track and nudge you.', label: 'Set goals', target: 'setup' });
   }
 
-  // Time-of-day trigger: prompt the fitting activity, unless already logged today.
+  // Time-of-day trigger: prompt the fitting activity, unless already logged today
+  // — and never in the middle of a calendar commitment (meetings are protected).
   const trig = timeTrigger(state.profile && state.profile.routine, nowMin);
-  if (trig) {
+  const busy = trig && day ? (day.commitments || []).find((c) => nowMin >= c.start && nowMin < c.end) : null;
+  if (busy) {
+    const hhmm = `${String(Math.floor(busy.end / 60)).padStart(2, '0')}:${String(busy.end % 60).padStart(2, '0')}`;
+    list.push({ kind: 'busy', text: `You’re in “${busy.title || 'a commitment'}” until ${hhmm} — I’ll hold suggestions till then. After that, a short ${CATEGORIES[trig.category].label.toLowerCase()} break could help.`, label: 'See options', target: 'plan' });
+  } else if (trig) {
     const done = day && (day.activityLog || []).some((x) => x.category === trig.category);
     if (!done) list.push({ kind: 'time', text: `${trig.text} (${CATEGORIES[trig.category].label})`, label: 'See options', target: 'plan' });
   }

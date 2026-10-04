@@ -14,6 +14,7 @@ import { buildNudges } from './nudges.js';
 import { recap } from './recap.js';
 import { answerQuery } from './ask.js';
 import { getPersona, PERSONA_KEYS, fill, pick } from './persona.js';
+import { safetyLevel, CRISIS_RESOURCES, breathingScript } from './safety.js';
 import { suggestActivities } from './match.js';
 import { recoverActivity } from './recovery.js';
 import { parseMovementUpload, parseHealthExport, isAppleHealthExport } from './ingest.js';
@@ -43,6 +44,11 @@ let voiceHeard = '';
 let voiceReply = '';
 let wakeOn = false;
 let wakeStop = null;
+// Safety + guided breathing state.
+let sessionSupport = null; // 'distress' | 'crisis' — raised by what the user said/typed this session
+let supportDismissed = false;
+let breathing = false;
+let breathTimer = null;
 
 // Tappable example phrases — chosen to exercise the parser (digits, spelled-out
 // numbers, "half an hour") so what you type/say maps cleanly to a log entry.
@@ -88,11 +94,49 @@ function renderSaveState() { const n = $('#save-state'); clear(n); n.append(el('
 function render() {
   renderChrome();
   const root = $('#view'); clear(root);
-  renderNudge(root);
+  renderSupport(root);
+  if (supportLevel() !== 'crisis') renderNudge(root); // no goal pressure during a crisis
   if (view === 'summary') renderToday(root);
   else if (view === 'log') renderLog(root);
   else if (view === 'plan') renderPlan(root);
   else renderSetup(root);
+}
+
+// ---- safety: a support card on every page when the user's own words signal
+// distress or crisis (check-in note, voice, or log text). Not an assessment. ----
+const LEVEL_RANK = { distress: 1, crisis: 2 };
+function raiseSupport(level) {
+  if (!level) return;
+  if (!sessionSupport || LEVEL_RANK[level] > LEVEL_RANK[sessionSupport]) sessionSupport = level;
+  supportDismissed = false;
+}
+function supportLevel() {
+  const d = state.days[iso];
+  const noteLevel = d && d.checkin && d.checkin.note ? safetyLevel(d.checkin.note) : null;
+  if (sessionSupport === 'crisis' || noteLevel === 'crisis') return 'crisis';
+  return sessionSupport || noteLevel || null;
+}
+function renderSupport(root) {
+  const level = supportLevel();
+  if (!level || supportDismissed) return;
+  const crisis = level === 'crisis';
+  const card = el('section', { class: `panel support ${crisis ? 'support-crisis' : 'support-distress'}`, role: crisis ? 'alert' : 'status' });
+  card.append(el('h2', { text: crisis ? 'You don’t have to go through this alone' : 'Feeling heavy today?' }));
+  card.append(el('p', { text: crisis
+    ? 'You deserve support right now. Daywell can’t help in an emergency, but these people can — any time:'
+    : 'Thanks for telling me. I can’t assess what’s going on, but a minute of slow breathing often helps in the moment. If this keeps coming back, talking to someone you trust or a professional is worth it.' }));
+  if (crisis) {
+    const list = el('ul', { class: 'support-list' });
+    for (const r of CRISIS_RESOURCES) list.append(el('li', {}, [el('strong', { text: `${r.label}: ` }), r.detail]));
+    card.append(list);
+  }
+  card.append(el('div', { class: 'row wrap' }, [
+    breathing
+      ? el('button', { class: 'btn danger', text: '■ Stop breathing', onclick: () => finishBreathing(false) })
+      : el('button', { class: 'btn primary', text: '🫁 Breathe with me (1 min)', onclick: startBreathing }),
+    el('button', { class: 'btn tiny', text: 'Hide for now', onclick: () => { supportDismissed = true; render(); } }),
+  ]));
+  root.append(card);
 }
 
 // A proactive, on-every-page banner: how you're tracking vs your own goals.
@@ -154,6 +198,9 @@ function renderToday(root) {
     vp.append(el('div', { class: 'row wrap' }, [
       el('button', { class: `btn ${voiceMode ? 'danger' : 'primary'}`, text: voiceMode ? '■ Stop' : '🎤 Start voice mode', onclick: toggleVoiceMode }),
       el('button', { class: `btn tiny ${wakeOn ? 'primary' : ''}`, text: wakeOn ? '👂 Listening for “Hey Daywell”' : '👂 Enable “Hey Daywell”', onclick: toggleWake }),
+      ttsSupported() ? (breathing
+        ? el('button', { class: 'btn tiny danger', text: '■ Stop breathing', onclick: () => finishBreathing(false) })
+        : el('button', { class: 'btn tiny', text: '🫁 Breathe with me', onclick: startBreathing })) : null,
     ]));
     vp.append(el('p', { class: 'muted small', text: voiceMode ? voiceStatusText() : (wakeOn ? 'Say “Hey Daywell” to start.' : 'Try: “log a 30 minute walk”, “how’s my week”, “switch to day”, “what should I do next”.') }));
     if ((voiceMode || wakeOn) && voiceHeard) vp.append(el('p', { class: 'small', text: `You: ${voiceHeard}` }));
@@ -395,12 +442,15 @@ function renderLogPreview(parsed, text) {
 function submitLog(source = 'text') {
   const text = $('#log-text').value.trim();
   if (!text) { flash('Enter what you did.', 'warn'); return; }
+  const lvl = safetyLevel(text);
+  if (lvl === 'crisis') { raiseSupport('crisis'); $('#log-text').value = ''; render(); return; } // not an activity — get support up
+  if (lvl) raiseSupport(lvl);
   const dur = Math.max(0, parseInt($('#log-dur') ? $('#log-dur').value : '0', 10) || 0);
   const before = goalMetKeys();
   day().activityLog.push({ id: uid('al'), category: logCat, text, durationMin: dur, source, at: new Date().toISOString() });
   persist();
   const cheer = celebrateManual(before);
-  flash(cheer || 'Logged.', cheer ? 'ok' : 'ok'); render();
+  flash(cheer || 'Logged.', 'ok'); render();
 }
 function quickLog(activity) {
   const before = goalMetKeys();
@@ -774,11 +824,13 @@ function sanitizeSpeech(text) {
   return String(text).replace(/[\u{1F000}-\u{1FFFF}☀-➿]/gu, '').replace(/[—–]/g, ', ').replace(/\s+/g, ' ').trim();
 }
 function currentPersona() { return getPersona(state.profile.persona); }
-function makeUtterance(text) {
+function makeUtterance(text, opts = {}) {
   const u = new SpeechSynthesisUtterance(sanitizeSpeech(text));
   if (ttsVoice) { u.voice = ttsVoice; u.lang = ttsVoice.lang; } else u.lang = navigator.language || 'en-US';
-  const p = currentPersona();
-  u.rate = p.rate; u.pitch = p.pitch; u.volume = 1; // persona sets the delivery
+  // Persona sets the delivery — except safety moments and breathing, which are
+  // always calm regardless of persona.
+  const p = opts.calm ? getPersona('calm') : currentPersona();
+  u.rate = opts.calm ? 0.9 : p.rate; u.pitch = p.pitch; u.volume = 1;
   return u;
 }
 
@@ -818,11 +870,11 @@ function speak(text) {
   try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(makeUtterance(text)); flash('Reading your recap aloud…', 'ok'); }
   catch { flash('Could not start readback.', 'warn'); }
 }
-function speakThen(text, done) {
+function speakThen(text, done, opts = {}) {
   if (!ttsSupported()) { if (done) done(); return; }
   try {
     window.speechSynthesis.cancel();
-    const u = makeUtterance(text);
+    const u = makeUtterance(text, opts);
     u.onend = () => { if (done) done(); };
     u.onerror = () => { if (done) done(); };
     window.speechSynthesis.speak(u);
@@ -895,17 +947,54 @@ function handleVoiceQuery(text) {
     const labels = newlyMetLabels(before);
     if (labels.length) { if (soundOn()) playChime(); reply = `${reply} ${cheerLine(labels)}`; }
   }
+  if (res.safety) raiseSupport(res.safety); // shows the support card on screen too
   voiceReply = reply;
   if (res.dimension) recapDim = res.dimension;
   if (res.view) view = res.view;
   voiceStatus = 'speaking'; render();
-  speakThen(res.reply, () => {
+  speakThen(reply, () => {
     voiceSpeaking = false;
+    if (res.action === 'breathe') { startBreathing(); return; }
     if (res.stop) { stopVoiceMode(); return; }
     if (voiceMode) listenTurn();
-  });
+  }, { calm: !!res.safety || res.action === 'breathe' });
 }
+// ---- guided box breathing: the agent ACTS, not just suggests ----
+function startBreathing() {
+  if (breathing) return;
+  if (!ttsSupported()) { flash('Guided breathing needs speech output, which this browser doesn’t support.', 'warn'); return; }
+  if (voiceLoopStop) { voiceLoopStop(); voiceLoopStop = null; }
+  if (wakeStop) { wakeStop(); wakeStop = null; }
+  breathing = true; voiceSpeaking = true; voiceStatus = 'breathing'; render();
+  const steps = breathingScript(3);
+  let i = 0;
+  const next = () => {
+    if (!breathing) return;
+    if (i >= steps.length) { finishBreathing(true); return; }
+    const st = steps[i]; i += 1;
+    speakThen(st.say, () => { breathTimer = setTimeout(next, st.waitMs); }, { calm: true });
+  };
+  next();
+}
+function finishBreathing(completed) {
+  if (!breathing) return;
+  breathing = false; voiceSpeaking = false;
+  clearTimeout(breathTimer); breathTimer = null;
+  if (completed) {
+    const before = goalMetKeys();
+    day().activityLog.push({ id: uid('al'), category: 'meditation', text: 'Guided box breathing', durationMin: 1, source: 'voice', at: new Date().toISOString() });
+    persist();
+    if (newlyMetLabels(before).length && soundOn()) playChime();
+  } else {
+    try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  }
+  voiceStatus = voiceMode ? 'listening' : (wakeOn ? 'waking' : 'idle');
+  render();
+  if (voiceMode) listenTurn(); else if (wakeOn) beginWakeListen();
+}
+
 function voiceStatusText() {
+  if (voiceStatus === 'breathing') return '🫁 Breathing together…';
   if (voiceStatus === 'speaking') return '🔊 Speaking…';
   if (voiceStatus === 'listening') return '● Listening… say what you did, or ask a question';
   if (voiceStatus === 'waking') return '👂 Waiting for “Hey Daywell”…';

@@ -6,7 +6,6 @@ import './helpers.js';
 import { defaultState, validateState, ensureDay } from '../src/planner/state.js';
 import { weekDates, weekProgress, nextSteps, summarize, matchVsPlan, todayReflection } from '../src/planner/goals.js';
 import { suggestActivities } from '../src/planner/match.js';
-import { suggestNext } from '../src/planner/assistant.js';
 import { recoverActivity } from '../src/planner/recovery.js';
 import { parseMovementUpload, parseHealthExport, isAppleHealthExport } from '../src/planner/ingest.js';
 import { parseSpoken, detectDuration, detectCategories } from '../src/planner/parse.js';
@@ -64,49 +63,6 @@ test('43 suggestActivities filters by category', () => {
   const r = suggestActivities(s, '2026-10-04', { categories: ['meditation'] });
   assert.equal(r.suggestions.length, 1);
   assert.equal(r.suggestions[0].activity.title, 'Breathe');
-});
-
-// 44. Assistant needs a check-in first
-test('44 assistant asks for check-in when none', () => {
-  const s = stateWith((st) => { st.library.activities = [lib({ id: 'a', title: 'Walk' })]; ensureDay(st, '2026-10-04'); });
-  const r = suggestNext(s, '2026-10-04');
-  assert.equal(r.needsCheckin, true);
-});
-
-// 45. Low energy -> prefers restorative (wind-down / meditation) from own library
-test('45 assistant prefers restorative on low energy', () => {
-  const s = stateWith((st) => {
-    st.library.activities = [lib({ id: 'r', category: 'movement', title: 'Run', durationMin: 40 }), lib({ id: 'w', category: 'winddown', title: 'Stretch + tea', durationMin: 10 })];
-    const d = ensureDay(st, '2026-10-04');
-    d.checkin = { mood: 3, energy: 1, note: '', at: '' };
-  });
-  const r = suggestNext(s, '2026-10-04');
-  assert.equal(r.items[0].activity.category, 'winddown');
-  assert.match(r.headline, /energy is low/);
-});
-
-// 46. Low mood -> surfaces a music/mood-lift option
-test('46 assistant surfaces mood-lift on low mood', () => {
-  const s = stateWith((st) => {
-    st.library.activities = [lib({ id: 'mu', category: 'music', title: 'Upbeat playlist', durationMin: 15 }), lib({ id: 'mv', category: 'movement', title: 'Walk', durationMin: 20 })];
-    const d = ensureDay(st, '2026-10-04'); d.checkin = { mood: 1, energy: 3, note: '', at: '' };
-  });
-  const r = suggestNext(s, '2026-10-04');
-  assert.ok(r.items.some((i) => i.activity && i.activity.category === 'music'));
-  assert.match(r.headline, /mood is low/);
-});
-
-// 47. Busy day -> prefers short activities
-test('47 assistant prefers short options on a busy day', () => {
-  const s = stateWith((st) => {
-    st.library.activities = [lib({ id: 'long', category: 'movement', title: 'Long run', durationMin: 60 }), lib({ id: 'short', category: 'movement', title: 'Quick walk', durationMin: 10 })];
-    const d = ensureDay(st, '2026-10-04');
-    d.checkin = { mood: 4, energy: 4, note: '', at: '' };
-    d.commitments = [{ id: 'c', title: 'Work', start: H(8), end: H(22), protected: true }]; // 14h committed -> busy
-  });
-  const r = suggestNext(s, '2026-10-04');
-  assert.equal(r.busy, true);
-  assert.ok(r.items.every((i) => !i.activity || i.activity.durationMin <= 20));
 });
 
 // 48. Recovery: movement placed around a commitment
@@ -538,4 +494,102 @@ test('79 newly-met goal is detected from before/after metric state', async () =>
   d.activityLog.push(log({ category: 'movement', durationMin: 15 })); // crosses the 10-min goal
   const after = metKeys(s);
   assert.ok(after.includes('moveMin') && !before.includes('moveMin')); // newly met
+});
+
+// ---- Health-agent review fixes (safety, parsing, personalization, calendar) ----
+
+// 80. safety layer: crisis vs distress vs ordinary text
+test('80 safety detects crisis and distress from the user\'s own words', async () => {
+  const { detectCrisis, detectDistress, safetyLevel } = await import('../src/planner/safety.js');
+  for (const t of ['I want to hurt myself', 'I feel hopeless', 'I want to die', "I don't want to be here anymore", 'thinking about suicide']) assert.equal(safetyLevel(t), 'crisis', t);
+  for (const t of ['I am feeling really anxious right now', "I'm so stressed", 'Feeling anxious about the next call', 'had a panic attack', "can't sleep again"]) assert.equal(safetyLevel(t), 'distress', t);
+  for (const t of ['log a 20 minute wind down', 'feeling great today', 'I did a 30 min run', 'how is my week']) assert.equal(safetyLevel(t), null, t);
+  assert.equal(detectDistress('I want to hurt myself'), false); // crisis is not downgraded
+  assert.equal(detectCrisis('feeling a bit stressed'), false);
+});
+
+// 81. voice: safety takes precedence; distress is supported, not refused
+test('81 answerQuery puts safety first and supports distress', async () => {
+  const { answerQuery } = await import('../src/planner/ask.js');
+  const s = stateWith((st) => { st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 6 }; });
+  const iso = '2026-10-08';
+  const c = answerQuery(s, iso, 'I want to hurt myself', { name: 'Sasa' });
+  assert.equal(c.safety, 'crisis');
+  assert.ok(/9 8 8/.test(c.reply) && /1 3 2 3/.test(c.reply), 'crisis reply includes hotlines');
+  assert.ok(!/not sure/i.test(c.reply));
+  assert.equal(answerQuery(s, iso, 'I want to die, stop', {}).safety, 'crisis'); // beats "stop"
+  const d = answerQuery(s, iso, 'I am feeling really anxious right now', {});
+  assert.equal(d.safety, 'distress');
+  assert.ok(/breathe with me/i.test(d.reply));
+  assert.equal(answerQuery(s, iso, 'breathe with me', {}).action, 'breathe');
+  assert.ok(/can’t assess/.test(answerQuery(s, iso, 'am I depressed?', {}).reply)); // assessment request → boundary
+  assert.equal(answerQuery(s, iso, 'log a 20 minute wind down', {}).action, 'log'); // "down" ≠ distress
+});
+
+// 82. parsing: whole-word keywords — no more "team"→tea, "tomorrow"→row
+test('82 detectCategories uses whole words', () => {
+  for (const t of ['lunch with the team', 'see you tomorrow', 'brunch with friends', 'already done', 'interesting talk']) assert.deepEqual(parseSpoken(t).categories, [], t);
+  assert.deepEqual(parseSpoken('listened to an uplifting playlist').categories, ['music']);
+  assert.equal(parseSpoken('went running for 20 minutes').category, 'movement');
+  assert.equal(parseSpoken('reading before bed').category, 'winddown');
+  assert.equal(parseSpoken('herbal tea and a bath').category, 'winddown');
+});
+
+// 83. voice no longer logs non-activities
+test('83 "I had lunch with the team" is not logged as an activity', async () => {
+  const { answerQuery } = await import('../src/planner/ask.js');
+  const r = answerQuery(defaultState(), '2026-10-08', 'I had lunch with the team', {});
+  assert.notEqual(r.action, 'log');
+});
+
+// 84. recommendations adapt to the user's own check-in
+test('84 analyze adapts the next step to self-reported energy', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const mk = (energy, mood) => stateWith((st) => {
+    st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 6 };
+    ensureDay(st, '2026-10-08').checkin = { mood, energy, note: '', at: '' };
+  });
+  const low = analyze(mk(1, 3), '2026-10-08');
+  assert.equal(low.capacity, 'low');
+  assert.equal(low.recommendations[0].side, 'mental');
+  assert.ok(/energy is low/.test(low.recommendations[0].rationale));
+  const high = analyze(mk(5, 4), '2026-10-08');
+  assert.equal(high.capacity, 'high');
+  assert.equal(high.recommendations[0].side, 'physical');
+  assert.notEqual(low.recommendations[0].title, high.recommendations[0].title);
+});
+
+// 85. nudges respect calendar commitments
+test('85 no activity prompt during a meeting', async () => {
+  const { buildNudges } = await import('../src/planner/nudges.js');
+  const s = stateWith((st) => {
+    st.profile.routine = { wake: 420, workStart: 540, workEnd: 1020, winddown: 1320, note: '' };
+    ensureDay(st, '2026-10-08').commitments = [{ id: 'c1', title: 'Board meeting', start: 720, end: 840, protected: true, source: 'ics' }];
+  });
+  const n = buildNudges(s, '2026-10-08', 13 * 60);
+  assert.equal(n.primary.kind, 'busy');
+  assert.ok(/Board meeting/.test(n.primary.text) && /14:00/.test(n.primary.text));
+  assert.notEqual(buildNudges(s, '2026-10-08', 15 * 60).primary.kind, 'busy'); // after the meeting
+});
+
+// 86. guided breathing script: 3 rounds of 4-4-4-4
+test('86 breathing script structure', async () => {
+  const { breathingScript } = await import('../src/planner/safety.js');
+  const steps = breathingScript(3);
+  assert.equal(steps.length, 1 + 12 + 1);
+  assert.equal(steps.filter((s) => s.waitMs === 4000).length, 12);
+  assert.ok(/logged/.test(steps[steps.length - 1].say));
+});
+
+// 87. low mood surfaces the user's own mood-lift (music) option (ported from the retired assistant)
+test('87 low mood prefers a saved music option', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = stateWith((st) => {
+    st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 6 };
+    st.library.activities = [lib({ id: 'mu', category: 'music', title: 'Upbeat playlist', durationMin: 15 }), lib({ id: 'me', category: 'meditation', title: 'Box breathing', durationMin: 5 })];
+    ensureDay(st, '2026-10-08').checkin = { mood: 1, energy: 3, note: '', at: '' };
+  });
+  const r = analyze(s, '2026-10-08').recommendations[0];
+  assert.equal(r.activity && r.activity.category, 'music');
+  assert.ok(/mood is low/.test(r.rationale));
 });

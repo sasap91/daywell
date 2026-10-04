@@ -1,7 +1,7 @@
 {
   "name": "daywell",
-  "version": "3.0.0",
-  "description": "Daywell — Late Meeting Recovery MVP. Local-first responsive web app.",
+  "version": "8.0.0",
+  "description": "Daywell — local-first personal health agent for physical and mental wellbeing.",
   "type": "module",
   "private": true,
   "scripts": {
