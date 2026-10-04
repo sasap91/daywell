@@ -67,6 +67,12 @@ refresh, and bookmarks work. The message bar sits under all of them.
    - **Steady** (otherwise) → a manageable step (≤20 min)
 
    Even when you're on track it adapts (unwind / lift your mood / optional bonus).
+
+   It also follows **today's contingency plan** (shown on the card as "Today's
+   plan", with an Edit link): bad weather in your note → indoor options only;
+   "meeting will run late" → assumes ~30 min over and times the step **after**
+   you're free; free too close to wind-down → a short wind-down instead of
+   exercise; and the step is never longer than the time left before wind-down.
    The optional AI must follow the same rule — code rejects strenuous movement
    when you said you're drained.
 5. **Day / Week / Month** — progress rings with a **goal for each period**, derived
@@ -81,7 +87,11 @@ file import (Apple Health `export.xml`, movement JSON/CSV). Logging itself happe
 in the message bar.
 
 ### Plan
-Plan activities around your commitments; **recover** when something can't happen
+**Conditions today** — earliest free time, indoor only, and a free-text note
+("raining", "meeting will run late"), saved per day. Daywell shows what it
+understood from the note, and the same plan drives *Do next*, nudges, voice, and
+the AI (which gets flags only, never the note text). Then plan activities around
+your commitments; **recover** when something can't happen
 (rain → indoor option in a real free window; a missed session → an anytime
 fallback).
 
@@ -218,7 +228,7 @@ Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
 ```bash
 cd "daywell"
 python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
-npm test                        # unit tests: node --test tests/*.test.js — 100 cases
+npm test                        # unit tests: node --test tests/*.test.js — 105 cases
 npm run smoke                   # headless-Chrome smoke test of the real UI (needs Chrome)
 ```
 
@@ -242,6 +252,7 @@ notifications) are thin, feature-detected wrappers.
 | Safety layer (crisis / distress / region lines / breathing) | `src/planner/safety.js` |
 | First-run setup, starter library, recommended goals | `src/planner/onboarding.js` |
 | Optional LLM layer (context, prompts, providers, validation) | `src/planner/llm.js` |
+| Today's contingency plan (weather, running late, free time, wind-down) | `src/planner/conditions.js` |
 | UI smoke test (headless Chrome) | `tests/smoke/run.mjs` |
 | Voice Q&A / command intent (deterministic) | `src/planner/ask.js` |
 | Voice personas (characters) | `src/planner/persona.js` |

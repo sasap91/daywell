@@ -4,7 +4,9 @@
 <script>
   // Seeds localStorage from the URL hash, then opens the real app.
   // #<base64 JSON {state, view}> — used only by tests/smoke/run.mjs.
-  const payload = JSON.parse(atob(decodeURIComponent(location.hash.slice(1))));
+  // base64 → bytes → UTF-8 (plain atob() would mangle non-ASCII text like “—”).
+  const bin = atob(decodeURIComponent(location.hash.slice(1)));
+  const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (ch) => ch.charCodeAt(0))));
   localStorage.clear();
   if (payload.state) localStorage.setItem('daywell.app.v7', JSON.stringify(payload.state));
   if (payload.ai) localStorage.setItem('daywell.ai.v1', JSON.stringify(payload.ai));

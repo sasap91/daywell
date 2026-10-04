@@ -83,7 +83,9 @@ export function buildContext(state, iso, a, nowMin = null) {
     checkin_today: ci ? { mood_1_to_5: ci.mood, energy_1_to_5: ci.energy } : null,
     capacity_today: a.capacity,
     mood_week_avg: a.mood.avgMood,
-    saved_activities: (state.library.activities || []).slice(0, 30).map((x) => ({ id: x.id, category: x.category, title: String(x.title).slice(0, 60), minutes: x.durationMin })),
+    saved_activities: (state.library.activities || []).slice(0, 30).map((x) => ({ id: x.id, category: x.category, title: String(x.title).slice(0, 60), minutes: x.durationMin, indoor: x.indoor === true })),
+    // Today's contingency plan as flags — never the raw note text.
+    conditions: a.conditions ? { indoor_only: a.conditions.indoorOnly, bad_weather: a.conditions.rainy, running_late: a.conditions.runningLate, busy_now: Boolean(a.conditions.busy), free_from: a.conditions.startsLater ? a.conditions.freeFromText : null, minutes_until_winddown: Math.max(0, a.conditions.windowMin), near_winddown: a.conditions.late } : null,
     recent_activity: recent.slice(-20),
     standard_next_step: base.title || null,
     allowed_categories: CATEGORY_KEYS,
@@ -100,6 +102,7 @@ export const SYSTEM_PROMPT = [
   '- Never invent numbers, activities, or sources. Cite a guideline only by its source_key.',
   '- You are not a clinician. Never diagnose, never suggest the user has any condition, and never mention biological age, aging reversal, disease risk, medication, supplements, or treatment.',
   '- If checkin_today is present, begin the analysis by acknowledging how the user said they feel, and match the step to it: energy 1-2 → gentle, at most 15 minutes; mood 1-2 → calming or uplifting and easy; energy 4-5 with mood 3+ → can be more active; otherwise moderate.',
+  '- Respect today\'s conditions: if indoor_only, never suggest outdoor activity; if near_winddown, suggest a short calm wind-down, not exercise; never suggest more minutes than minutes_until_winddown; if free_from is set, the step happens after that time.',
   '- Prefer one of the user\'s saved activities (return its exact id) when it fits; otherwise suggest a category.',
   '- Be specific, encouraging, and brief. Plain language. No emojis. Address the user as "you".',
 ].join('\n');
@@ -197,6 +200,14 @@ export function validateRecommendation(raw, ctx) {
   if (!next) return { ok: false, reason: 'invalid next step' };
   // Code-enforced respect for the check-in: no strenuous movement when the user
   // said their energy is low (1-2). Unspecified length counts as too long.
+  const cnd = ctx.conditions;
+  if (cnd && next.category === 'movement') {
+    const act = (ctx.saved_activities || []).find((x) => x.id === next.activityId);
+    if (cnd.indoor_only && act && !act.indoor) return { ok: false, reason: 'outdoor activity despite indoor-only conditions' };
+    if (cnd.indoor_only && /\b(outside|outdoors?|run outside|jog outside|hike|park)\b/i.test(`${next.title} ${next.why}`)) return { ok: false, reason: 'outdoor activity despite indoor-only conditions' };
+    if (cnd.near_winddown) return { ok: false, reason: 'exercise too close to wind-down' };
+    if (next.minutes != null && next.minutes > cnd.minutes_until_winddown) return { ok: false, reason: 'longer than the time left today' };
+  }
   const ci = ctx.checkin_today;
   if (ci && ci.energy_1_to_5 <= 2 && next.category === 'movement' && (next.minutes == null || next.minutes > 15)) {
     return { ok: false, reason: 'too intense for the user\'s low energy' };

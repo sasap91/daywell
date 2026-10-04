@@ -148,6 +148,8 @@ function validateDay(raw) {
     checkin: validateCheckin(raw.checkin),
     health: validateHealth(raw.health),
     weatherNote: typeof raw.weatherNote === 'string' ? raw.weatherNote.slice(0, 200) : '',
+    indoorOnly: raw.indoorOnly === true,
+    freeFrom: Number.isInteger(raw.freeFrom) && raw.freeFrom >= 0 && raw.freeFrom < 1440 ? raw.freeFrom : null,
   };
 }
 
@@ -191,7 +193,7 @@ export function validateState(raw) {
 
 export function ensureDay(state, iso) {
   if (!state.days[iso]) {
-    state.days[iso] = { commitments: [], activities: [], activityLog: [], checkin: null, health: { restingHR: null, sleepHours: null, source: null }, weatherNote: '' };
+    state.days[iso] = { commitments: [], activities: [], activityLog: [], checkin: null, health: { restingHR: null, sleepHours: null, source: null }, weatherNote: '', indoorOnly: false, freeFrom: null };
   }
   const d = state.days[iso];
   if (!Array.isArray(d.activities)) d.activities = [];

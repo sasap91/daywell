@@ -56,6 +56,15 @@ function load(view, state, ai = null) {
   });
 }
 
+// A meeting happening right now (relative to the real clock), running late, in the rain.
+const nowM = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+const hack = () => {
+  const st = base({ day: { checkin: { mood: 3, energy: 3, note: '', at: '' }, weatherNote: "sundai hack will run late and it's raining outside.",
+    commitments: [{ id: 'c1', title: 'Sundai Hack 143 — Biomarkers of Aging', start: Math.max(0, nowM - 60), end: Math.min(1430, nowM + 30), protected: true, source: 'ics' }] } });
+  st.profile.routine.winddown = Math.min(1430, nowM + 30); // free right around wind-down
+  return st;
+};
+
 const cases = [
   { name: 'first run (empty) → setup card, check-in, composer', view: 'today', state: null,
     has: ['Let’s get you set up', 'How are you feeling?', 'Do next', 'id="composer-input"', 'Good '], lacks: ['Uncaught'] },
@@ -65,6 +74,10 @@ const cases = [
   { name: 'crisis in check-in note → support card + crisis line, no goal nudge', view: 'today',
     state: base({ profile: { region: 'TH' }, day: { checkin: { mood: 1, energy: 2, note: 'I feel hopeless', at: '' } } }),
     has: ['You don’t have to go through this alone', '1323', 'findahelpline.com', 'Breathe with me'], lacks: ['class="nudge '] },
+  { name: 'contingency plan (late meeting + rain) shapes Do next', view: 'today', state: hack(),
+    has: ['Today’s plan:', 'Sundai Hack 143 — Biomarkers of Aging', 'may run late', 'indoors', 'after '], lacks: ['Brisk walk'] },
+  { name: 'Plan shows what Daywell understood from the note', view: 'plan', state: hack(),
+    has: ['Your note mentions bad weather', 'may run late', 'wind-down instead of exercise'], lacks: [] },
   { name: 'history view', view: 'history', state: base(), has: ['Logged today', 'morning walk', 'Sleep &amp; heart rate', 'Import'], lacks: [] },
   { name: 'plan view', view: 'plan', state: base(), has: ['Today\'s plan', 'Suggested activities'], lacks: [] },
   { name: 'setup view', view: 'setup', state: base(), has: ['About you', 'Region (for support lines)', 'Voice', 'Weekly goals', 'Use recommended', 'AI assistant', 'Off — built-in rules only'], lacks: [] },

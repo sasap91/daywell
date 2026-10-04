@@ -10,6 +10,7 @@ import {
   defaultState, validateState, uid, CATEGORIES, CATEGORY_KEYS,
 } from './state.js';
 import { analyze, periodMetrics } from './analyze.js';
+import { readConditions, LATE_BUFFER_MIN } from './conditions.js';
 import { buildNudges } from './nudges.js';
 import { recap } from './recap.js';
 import { answerQuery } from './ask.js';
@@ -30,7 +31,6 @@ let state;
 let iso = todayIso();
 let view = 'summary';
 let saveFlag = { ok: true, error: null };
-let movementCtx = { floor: 0, indoorOnly: false };
 let planCat = 'movement';
 let recapDim = 'week';
 // Composer (type or talk, on every page).
@@ -261,14 +261,14 @@ function converse(text, { spoken }) {
 
   const aiAllowed = aiOn() && !res.safety && !supportLevel();
   // "What should I do next?" → the same AI next step the Today card shows, if ready.
-  if (aiAllowed && res.intent === 'next' && aiRec.status === 'ready' && aiRec.key === aiFingerprint(analyze(state, iso))) {
+  if (aiAllowed && res.intent === 'next' && aiRec.status === 'ready' && aiRec.key === aiFingerprint(todayAnalysis())) {
     reply = `${aiRec.value.next.title}. ${aiRec.value.next.why}`;
   }
   chat.push({ who: 'you', text });
   if (aiAllowed && res.fallback) {
     const msg = { who: 'daywell', text: 'Thinking…', thinking: true };
     chat.push(msg);
-    const pending = aiChat(state, atIso, analyze(state, atIso), text, aiCfg, { nowMin: nowMinForView() })
+    const pending = aiChat(state, atIso, analyze(state, atIso, { nowMin: atIso === todayIso() ? curMinutes() : null }), text, aiCfg, { nowMin: nowMinForView() })
       .then((v) => {
         let final = v.reply;
         if (v.entries.length) {
@@ -400,7 +400,7 @@ function partOfDay() { const h = new Date().getHours(); if (h >= 5 && h < 12) re
 
 function renderToday(root) {
   const d = day();
-  const a = analyze(state, iso);
+  const a = todayAnalysis(); // includes the contingency plan (meeting, weather, free time)
   const who = firstName();
 
   const ob = onboardingStatus(state);
@@ -419,6 +419,7 @@ function renderToday(root) {
   const recCard = (r) => {
     const card = el('div', { class: `rec ${r.priority} side-${r.side}` });
     card.append(el('p', { class: 'rec-title', text: r.title }));
+    if (r.when || (r.indoor && r.side === 'physical')) card.append(el('div', { class: 'rec-tags' }, [r.when ? el('span', { class: 'tag', text: `⏰ ${r.when}` }) : null, r.indoor && r.side === 'physical' ? el('span', { class: 'tag', text: '🏠 indoor' }) : null]));
     card.append(el('p', { class: 'rec-why', text: r.rationale }));
     if (r.source) card.append(el('p', { class: 'rec-src', text: `Source: ${r.source}` }));
     const cta = el('div', { class: 'row wrap actions' });
@@ -450,6 +451,18 @@ function renderToday(root) {
     ]));
   } else {
     np.append(el('div', { class: 'based-on empty' }, [el('span', { text: 'Tap how you feel above and this step will adapt to your mood and energy.' })]));
+  }
+  const c = a.conditions;
+  if (c && c.active) {
+    const bits = [];
+    if (c.busy) bits.push(`📅 ${c.busy.title}${c.runningLate ? ' (may run late)' : ''} → free ~${c.freeFromText}`);
+    else if (c.startsLater) bits.push(`⏰ free from ${c.freeFromText}`);
+    if (c.indoorOnly) bits.push(c.rainy ? '🌧 bad weather → indoors' : '🏠 indoors only');
+    if (c.late) bits.push(`🌙 near your ${c.windDownText} wind-down`);
+    np.append(el('div', { class: 'based-on plan' }, [
+      el('span', { text: `Today’s plan: ${bits.join(' · ')}` }),
+      el('button', { class: 'link', type: 'button', text: 'Edit', onclick: () => go('plan') }),
+    ]));
   }
   if (aiReadyNow) np.append(el('p', { class: 'ai-analysis', text: ai.value.analysis }));
   if (ai && ai.status === 'loading') np.append(el('p', { class: 'muted small ai-status', text: '✨ Personalizing with AI… showing the standard step meanwhile.' }));
@@ -702,20 +715,31 @@ function saveHealth() {
 function renderPlan(root) {
   const d = day();
 
-  const ctx = panel('Conditions today', 'Contingency');
+  // Contingency plan — saved per day and used by Do next, nudges, voice, and the AI.
+  const cond = readConditions(state, iso, nowMinForView());
+  const ctx = panel('Conditions today', 'Contingency · shapes your Do next');
   ctx.append(el('div', { class: 'row wrap' }, [
-    el('label', { class: 'inline-label' }, ['Earliest free time ', el('input', { id: 'mv-floor', type: 'time', value: toClockInput(movementCtx.floor), onchange: (e) => { movementCtx.floor = parseClock(e.target.value) || 0; render(); } })]),
-    el('label', { class: 'inline-label' }, [el('input', { id: 'mv-indoor', type: 'checkbox', ...(movementCtx.indoorOnly ? { checked: 'checked' } : {}), onchange: (e) => { movementCtx.indoorOnly = e.target.checked; render(); } }), ' Indoor only (e.g. rain)']),
+    el('label', { class: 'inline-label' }, ['Earliest free time ', el('input', { id: 'mv-floor', type: 'time', value: Number.isInteger(d.freeFrom) ? toClockInput(d.freeFrom) : '', onchange: (e) => update(() => { const m = parseClock(e.target.value); day().freeFrom = e.target.value && Number.isInteger(m) ? m : null; }, 'Free time saved — Do next updated.') })]),
+    el('label', { class: 'inline-label' }, [el('input', { id: 'mv-indoor', type: 'checkbox', ...(d.indoorOnly ? { checked: 'checked' } : {}), onchange: (e) => update(() => { day().indoorOnly = e.target.checked; }, e.target.checked ? 'Indoor only — Do next updated.' : 'Outdoor options back on.') }), ' Indoor only (e.g. rain)']),
   ]));
-  ctx.append(el('input', { class: 'note', type: 'text', value: d.weatherNote, placeholder: 'Weather / notes (e.g. raining until 5pm)…', onchange: (e) => update(() => { d.weatherNote = e.target.value; }) }));
-  ctx.append(el('p', { class: 'muted small', text: 'Used so a recovered movement fits around your commitments.' }));
+  ctx.append(el('input', { class: 'note', type: 'text', value: d.weatherNote, placeholder: 'Weather / notes — e.g. “raining”, “meeting will run late”', onchange: (e) => update(() => { day().weatherNote = e.target.value.slice(0, 200); }, 'Noted — Do next updated.') }));
+  // Show what Daywell understood, so the effect is never a mystery.
+  const understood = [];
+  if (cond.rainy && !d.indoorOnly) understood.push('🌧 Your note mentions bad weather → indoor options only');
+  else if (d.indoorOnly) understood.push('🏠 Indoor options only');
+  if (cond.runningLate) understood.push(cond.busy ? `⏰ “${cond.busy.title}” may run late → assuming you're free around ${cond.freeFromText}` : `⏰ Running late noted → +${LATE_BUFFER_MIN} min buffer on your last commitment`);
+  else if (cond.busy) understood.push(`📅 In “${cond.busy.title}” → free from ${cond.freeFromText}`);
+  if (cond.late) understood.push(`🌙 Free close to your ${cond.windDownText} wind-down → a short wind-down instead of exercise`);
+  ctx.append(understood.length
+    ? el('ul', { class: 'understood' }, understood.map((t) => el('li', { text: t })))
+    : el('p', { class: 'muted small', text: 'Tell Daywell what changed today; it adjusts your Do next and recovery options to fit.' }));
   root.append(ctx);
 
   // Suggestions, filtered by category toggle
   const catRow = el('div', { class: 'row wrap toggle' });
   catRow.append(el('button', { class: `btn tiny ${planCat === 'all' ? 'primary' : ''}`, text: 'All', onclick: () => { planCat = 'all'; render(); } }));
   for (const k of CATEGORY_KEYS) catRow.append(el('button', { class: `btn tiny ${planCat === k ? 'primary' : ''}`, text: CATEGORIES[k].label, onclick: () => { planCat = k; render(); } }));
-  const sug = suggestActivities(state, iso, { categories: planCat === 'all' ? null : [planCat], indoorOnly: movementCtx.indoorOnly });
+  const sug = suggestActivities(state, iso, { categories: planCat === 'all' ? null : [planCat], indoorOnly: cond.indoorOnly });
   const sp = panel('Suggested activities', 'From your library');
   sp.append(catRow);
   if (!sug.suggestions.length) sp.append(el('p', { class: 'muted', text: 'No matching saved activities. Add some in Setup & Goals.' }));
@@ -753,7 +777,8 @@ function plannedRow(a) {
   row.append(actions);
   row.append(el('input', { class: 'note', type: 'text', value: a.note, placeholder: 'Record what you actually did…', onchange: (e) => update(() => { a.note = e.target.value; }, 'Note saved.') }));
   if (a.status === 'skipped') {
-    const rec = recoverActivity(state, iso, a.id, { indoorOnly: movementCtx.indoorOnly, floor: movementCtx.floor });
+    const cnd = readConditions(state, iso, nowMinForView());
+    const rec = recoverActivity(state, iso, a.id, { indoorOnly: cnd.indoorOnly, floor: cnd.freeFrom });
     const box = el('div', { class: 'recover-box' });
     if (rec.hasOption) {
       box.append(el('p', { text: `Recovery: ${rec.recommended.title}${rec.window ? ` at ${formatRange(rec.window.start, rec.window.end)}` : ''} — ${rec.reason}` }));
@@ -957,14 +982,14 @@ function renderAiPanel() {
     'It never sees your name, age, region, check-in notes, or heart rate. Crisis and distress moments never use AI; those replies and crisis lines are fixed and checked.',
   ]) how.append(el('p', { class: 'small', text: line }));
   how.append(el('p', { class: 'small', text: 'Exactly what would be sent right now:' }));
-  how.append(el('pre', { class: 'ai-preview', text: JSON.stringify(buildContext(state, iso, analyze(state, iso), nowMinForView()), null, 2) }));
+  how.append(el('pre', { class: 'ai-preview', text: JSON.stringify(buildContext(state, iso, todayAnalysis(), nowMinForView()), null, 2) }));
   ap.append(how);
 
   if (aiOn()) {
     ap.append(el('button', { class: 'btn tiny', text: 'Test AI', onclick: async (e) => {
       const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Testing…';
       try {
-        const v = await aiRecommend(state, iso, analyze(state, iso), aiCfg, { nowMin: nowMinForView() });
+        const v = await aiRecommend(state, iso, todayAnalysis(), aiCfg, { nowMin: nowMinForView() });
         flash(`AI works — suggested: “${v.next.title}”`, 'ok');
       } catch (err) { flash(`AI test failed: ${(err && err.message) || err}`, 'error'); }
       btn.disabled = false; btn.textContent = 'Test AI';
@@ -1100,6 +1125,8 @@ function playChime() {
     });
   } catch { /* ignore */ }
 }
+// The one analysis the UI, chat, and AI share: goals + check-in + contingency plan.
+function todayAnalysis() { return analyze(state, iso, { nowMin: nowMinForView() }); }
 function goalMetKeys() { try { return analyze(state, iso).metrics.filter((m) => m.met).map((m) => m.key); } catch { return []; } }
 function newlyMetLabels(before) {
   const had = new Set(before);

@@ -7,6 +7,7 @@
 
 import { analyze } from './analyze.js';
 import { CATEGORIES } from './state.js';
+import { readConditions } from './conditions.js';
 
 // Given the user's routine anchors and the current minute-of-day, pick the
 // activity category that fits this time of day + a short prompt. Deterministic;
@@ -45,8 +46,12 @@ export function buildNudges(state, iso, nowMin = null) {
   const trig = timeTrigger(state.profile && state.profile.routine, nowMin);
   const busy = trig && day ? (day.commitments || []).find((c) => nowMin >= c.start && nowMin < c.end) : null;
   if (busy) {
-    const hhmm = `${String(Math.floor(busy.end / 60)).padStart(2, '0')}:${String(busy.end % 60).padStart(2, '0')}`;
-    list.push({ kind: 'busy', text: `You’re in “${busy.title || 'a commitment'}” until ${hhmm} — I’ll hold suggestions till then. After that, a short ${CATEGORIES[trig.category].label.toLowerCase()} break could help.`, label: 'See options', target: 'plan' });
+    // Contingency: if the note says it may run late, plan around the buffer.
+    const cond = readConditions(state, iso, nowMin);
+    const end = cond.busyUntil != null ? cond.busyUntil : busy.end;
+    const hhmm = `${String(Math.floor(end / 60) % 24).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`;
+    const after = cond.late ? 'a short wind-down before bed is the best fit' : `a short ${CATEGORIES[trig.category].label.toLowerCase()} break could help${cond.indoorOnly ? ' (indoors)' : ''}`;
+    list.push({ kind: 'busy', text: `You’re in “${busy.title || 'a commitment'}”${cond.runningLate ? ', which may run late,' : ''} until about ${hhmm} — I’ll hold suggestions till then. After that, ${after}.`, label: 'See options', target: 'plan' });
   } else if (trig) {
     const done = day && (day.activityLog || []).some((x) => x.category === trig.category);
     if (!done) list.push({ kind: 'time', text: `${trig.text} (${CATEGORIES[trig.category].label})`, label: 'See options', target: 'plan' });

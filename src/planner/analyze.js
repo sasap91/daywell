@@ -8,6 +8,7 @@
 import { weekProgress, weekDates, monthDates } from './goals.js';
 import { suggestActivities } from './match.js';
 import { CATEGORIES } from './state.js';
+import { readConditions } from './conditions.js';
 
 // General, cited guidance — the "scientific" anchor for recommendations. These
 // are population guidelines, not personal prescriptions or outcome promises.
@@ -117,7 +118,10 @@ function metricsSummary(metrics) {
   return metrics.map((m) => (m.target > 0 ? `${m.label} ${m.done}/${m.target}` : `${m.label} (no goal)`)).join(' · ');
 }
 
-export function analyze(state, iso) {
+// opts.nowMin (minutes since midnight, only when viewing today) lets the
+// contingency plan account for the current meeting and the time left today.
+export function analyze(state, iso, opts = {}) {
+  const cond = readConditions(state, iso, opts.nowMin != null ? opts.nowMin : null);
   const wk = weekAgg(state, iso);
   const prog = weekProgress(state, iso);
 
@@ -149,7 +153,8 @@ export function analyze(state, iso) {
   // own behavior), then shortest. suggestActivities alone sorts by duration only.
   const usage = activityUsage(state, iso);
   const pickSaved = (cats) => {
-    const sug = suggestActivities(state, iso, { categories: cats }).suggestions || [];
+    // Contingency: outdoor movement is filtered out when it's indoors-only today.
+    const sug = suggestActivities(state, iso, { categories: cats, indoorOnly: cond.indoorOnly }).suggestions || [];
     for (const c of cats) {
       const inCat = sug.filter((x) => x.activity.category === c);
       if (inCat.length) {
@@ -199,11 +204,14 @@ export function analyze(state, iso) {
       source: GUIDES.mind.source, activity: act, addCat: act ? null : (mode === 'lift' ? 'music' : 'meditation') });
   }
   // Movement size follows the check-in: rest 10 · lift 15 · steady ≤20 · push ≤45 · no check-in ≤30.
-  const moveCap = { rest: 10, lift: 15, steady: 20, push: 45 }[mode] || 30;
+  // The contingency plan caps it further: only what fits between being free and wind-down.
+  let moveCap = { rest: 10, lift: 15, steady: 20, push: 45 }[mode] || 30;
+  if (cond.windowMin > 0 && cond.windowMin < moveCap + 10) moveCap = Math.max(5, Math.floor((cond.windowMin - 5) / 5) * 5);
+  const indoor = cond.indoorOnly;
   const moveTitle = (act, chunk) => {
-    if (mode === 'rest') return act ? `Log “${act.title}” — keep it gentle (~${chunk} min)` : `Try a gentle ${chunk}-minute walk or stretch`;
-    if (mode === 'lift') return act ? `Log “${act.title}” — a short one (~${chunk} min) can lift your mood` : `A short ${chunk}-minute walk, outside if you can`;
-    return act ? `Log “${act.title}” (~${chunk} min)` : `Add about ${chunk} min of movement`;
+    if (mode === 'rest') return act ? `Log “${act.title}” — keep it gentle (~${chunk} min)` : (indoor ? `Try a gentle ${chunk}-minute indoor stretch` : `Try a gentle ${chunk}-minute walk or stretch`);
+    if (mode === 'lift') return act ? `Log “${act.title}” — a short one (~${chunk} min) can lift your mood` : (indoor ? `A short ${chunk}-minute indoor workout or dance — it can lift your mood` : `A short ${chunk}-minute walk, outside if you can`);
+    return act ? `Log “${act.title}” (~${chunk} min)` : (indoor ? `Add about ${chunk} min of indoor movement` : `Add about ${chunk} min of movement`);
   };
   if (deficit(mmin) >= 0) {
     const chunk = (mode === 'rest' || mode === 'lift') ? moveCap : Math.min(Math.max(10, mmin.behind), moveCap);
@@ -224,13 +232,29 @@ export function analyze(state, iso) {
       rationale: `Your sleep is averaging ${sleep.avg} h over ${sleep.nights} night${sleep.nights !== 1 ? 's' : ''}; guidance suggests ${SLEEP_FLOOR}+. An earlier wind-down may help.`,
       source: GUIDES.sleep.source, activity: pickSaved(['winddown']), addCat: 'winddown' });
   }
+  // Contingency: free too close to wind-down → no movement tonight; a short wind-down leads.
+  if (cond.late) {
+    for (const c of cands) if (c.kind === 'move') c.score -= 1;
+    if (!cands.some((c) => c.kind === 'mind' || c.kind === 'sleep')) {
+      const act = pickSaved(['winddown', 'meditation']);
+      cands.push({ kind: 'late', score: 0.9, side: 'mental',
+        title: act ? `Keep tonight easy — “${act.title}” before bed` : 'Keep tonight easy — a short wind-down before bed',
+        rationale: `Vigorous exercise right before bed can make it harder for some people to settle, and a calm routine helps sleep. ${GUIDES.sleep.text}`,
+        source: GUIDES.sleep.source, activity: act, addCat: act ? null : 'winddown' });
+    }
+  }
   for (const c of cands) {
+    if (cond.late && (c.kind === 'mind' || c.kind === 'sleep')) c.score += 0.6;
     if (mode === 'rest' && (c.kind === 'mind' || c.kind === 'sleep')) c.score += 0.5;
     if (mode === 'lift') c.score += c.kind === 'mind' ? 0.5 : (c.kind === 'move' ? 0.25 : 0);
     if (mode === 'push' && c.kind === 'move') c.score += 0.5;
   }
   cands.sort((a, b) => b.score - a.score);
+  // Lead with the contingency plan, then the check-in, then the evidence.
+  const sentence = (parts) => (parts.length ? `${parts.join('; ').replace(/^./, (ch) => ch.toUpperCase())}.` : '');
+  const condNote = sentence(cond.summary);
   if (cands[0] && checkinNote) cands[0].rationale = `${checkinNote} ${cands[0].rationale}`;
+  if (cands[0] && condNote) cands[0].rationale = `${condNote} ${cands[0].rationale}`;
 
   let recommendations;
   let status;
@@ -251,7 +275,12 @@ export function analyze(state, iso) {
       const act = pickSaved(['movement']);
       Object.assign(rec, { side: 'physical', title: act ? `You’re on track — optional bonus: “${act.title}”` : 'You’re on track — an optional bonus walk while you’ve got the energy', activity: act, addCat: act ? null : 'movement' });
     }
+    if (cond.late && mode !== 'rest' && mode !== 'lift') {
+      const act = pickSaved(['winddown', 'meditation']);
+      Object.assign(rec, { side: 'mental', title: act ? `You’re on track — keep tonight easy with “${act.title}”` : 'You’re on track — keep tonight easy with a short wind-down', activity: act, addCat: act ? null : 'winddown' });
+    }
     if (checkinNote) rec.rationale = `${checkinNote} ${rec.rationale}`;
+    if (condNote) rec.rationale = `${condNote} ${rec.rationale}`;
     recommendations = [rec];
     status = { tone: 'ok', label: metCount >= 2 ? 'On pace — goals on track this week' : 'On pace with your goals this week' };
   } else {
@@ -259,13 +288,15 @@ export function analyze(state, iso) {
     const behindCount = metrics.filter((m) => m.target > 0 && (m.status === 'behind' || m.status === 'slightly-behind')).length;
     status = { tone: 'warn', label: `${behindCount} goal${behindCount !== 1 ? 's' : ''} behind pace — one small step below` };
   }
-  recommendations = recommendations.slice(0, 3).map((r, i) => ({ ...r, priority: i === 0 ? 'primary' : 'secondary' }));
+  // Timing from the contingency plan rides along so the UI can say "after 22:30".
+  const when = cond.startsLater ? `after ${cond.freeFromText}` : null;
+  recommendations = recommendations.slice(0, 3).map((r, i) => ({ ...r, priority: i === 0 ? 'primary' : 'secondary', when, indoor: cond.indoorOnly }));
 
   const guidelines = guidelineChecks(state, iso, wk);
   const guidelinesMet = guidelines.filter((g) => g.status === 'meets').length;
 
   const checkin = ci ? { mood: ci.mood, energy: ci.energy, moodWord, energyWord, mode } : null;
-  return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, checkin, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
+  return { status, metrics, guidelines, guidelinesMet, sleep, mood, capacity, checkin, conditions: cond, recommendations, elapsed: wk.elapsed, daysLeft: wk.daysLeft };
 }
 
 // ---------- period goals: day / week / month have different targets ----------

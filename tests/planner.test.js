@@ -861,3 +861,81 @@ test('104 AI output that ignores low energy is rejected', async () => {
   assert.equal(validateRecommendation(step('movement', 10), ctx).ok, true);
   assert.equal(validateRecommendation(step('meditation', 0), ctx).ok, true);
 });
+
+// ---- Do next follows the contingency plan (meeting, weather, free time) ----
+const sundai = (over = {}) => stateWith((st) => {
+  st.profile.goals = { movementSessionsPerWeek: 4, movementMinutesPerWeek: 150, mindfulnessSessionsPerWeek: 5 };
+  st.profile.routine = { wake: 420, workStart: 540, workEnd: 1020, winddown: 1320, note: '' };
+  st.library.activities = [lib({ id: 'walk', category: 'movement', title: 'Brisk walk', durationMin: 20, indoor: false }), lib({ id: 'gym', category: 'movement', title: 'Bodyweight strength workout', durationMin: 20, indoor: true }), lib({ id: 'read', category: 'winddown', title: 'Read before bed', durationMin: 15 }), lib({ id: 'box', category: 'meditation', title: 'Box breathing', durationMin: 5 })];
+  const d = ensureDay(st, '2026-10-04');
+  d.commitments = [{ id: 'c', title: 'Sundai Hack 143 — Biomarkers of Aging', start: 18 * 60, end: 22 * 60, protected: true, source: 'ics' }];
+  d.weatherNote = "sundai hack will run late and it's raining outside.";
+  Object.assign(d, over);
+});
+
+// 105. the note is understood: rain → indoor, "run late" → +30 min buffer
+test('105 readConditions understands the note and the calendar', async () => {
+  const { readConditions } = await import('../src/planner/conditions.js');
+  const c = readConditions(sundai(), '2026-10-04', 21 * 60);
+  assert.equal(c.rainy, true); assert.equal(c.indoorOnly, true);
+  assert.equal(c.runningLate, true);
+  assert.equal(c.busy.title, 'Sundai Hack 143 — Biomarkers of Aging');
+  assert.equal(c.freeFromText, '22:30'); // 22:00 + late buffer
+  assert.equal(c.late, true); // free after the 22:00 wind-down
+  const clear = readConditions(stateWith((st) => { ensureDay(st, '2026-10-04'); }), '2026-10-04', 14 * 60);
+  assert.equal(clear.active, false); assert.equal(clear.indoorOnly, false);
+});
+
+// 106. your scenario: in a late-running hack, raining, near wind-down → no exercise, a wind-down
+test('106 Do next during a late-running meeting near bedtime is a wind-down', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const a = analyze(sundai(), '2026-10-04', { nowMin: 21 * 60 });
+  const r = a.recommendations[0];
+  assert.equal(r.side, 'mental');
+  assert.ok(!/walk|workout|movement/i.test(r.title), r.title);
+  assert.ok(/Sundai Hack .* may run late/.test(r.rationale) && /22:30/.test(r.rationale));
+  assert.equal(r.when, 'after 22:30');
+});
+
+// 107. rain in the afternoon → indoor movement, never the outdoor walk
+test('107 bad weather swaps outdoor movement for indoor', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const favourWalk = (st) => { st.library.activities.find((x) => x.id === 'walk').durationMin = 10; return st; }; // walk wins when allowed
+  const s = favourWalk(sundai({ commitments: [], weatherNote: 'raining all day' }));
+  s.days['2026-10-04'].checkin = { mood: 4, energy: 5, note: '', at: '' }; // push → movement leads
+  const r = analyze(s, '2026-10-04', { nowMin: 14 * 60 }).recommendations[0];
+  assert.equal(r.activity && r.activity.title, 'Bodyweight strength workout');
+  assert.equal(r.indoor, true);
+  const dry = favourWalk(sundai({ commitments: [], weatherNote: '' }));
+  dry.days['2026-10-04'].checkin = { mood: 4, energy: 5, note: '', at: '' };
+  assert.equal(analyze(dry, '2026-10-04', { nowMin: 14 * 60 }).recommendations[0].activity.title, 'Brisk walk');
+});
+
+// 108. earliest free time and the window before wind-down size the step
+test('108 earliest free time delays and shortens the step', async () => {
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = sundai({ commitments: [], weatherNote: '', freeFrom: 21 * 60 + 30 }); // free 21:30, wind-down 22:00
+  s.days['2026-10-04'].checkin = { mood: 4, energy: 5, note: '', at: '' };
+  const r = analyze(s, '2026-10-04', { nowMin: 15 * 60 }).recommendations[0];
+  assert.equal(r.when, 'after 21:30');
+  const m = /~(\d+) min/.exec(r.title);
+  assert.ok(!m || Number(m[1]) <= 25, r.title); // fits the 30-min window
+  assert.equal(validateState({ days: { '2026-10-04': { freeFrom: 1290, indoorOnly: true } } }).state.days['2026-10-04'].freeFrom, 1290);
+});
+
+// 109. the AI is held to the plan too
+test('109 AI output that breaks the contingency plan is rejected', async () => {
+  const { validateRecommendation, buildContext } = await import('../src/planner/llm.js');
+  const { analyze } = await import('../src/planner/analyze.js');
+  const s = sundai({ commitments: [], weatherNote: 'raining' });
+  const ctx = buildContext(s, '2026-10-04', analyze(s, '2026-10-04', { nowMin: 14 * 60 }), 14 * 60);
+  assert.equal(ctx.conditions.indoor_only, true);
+  assert.ok(!JSON.stringify(ctx).includes('raining')); // flags only, never the raw note
+  const step = (id, title) => ({ analysis: 'It is raining today.', next_step: { title, why: 'Movement is behind.', category: 'movement', activity_id: id, minutes: 20, source_key: 'who_activity' }, also_consider: [] });
+  assert.equal(validateRecommendation(step('walk', 'Go for your brisk walk'), ctx).ok, false);
+  assert.equal(validateRecommendation(step('', 'Take a run outside'), ctx).ok, false);
+  assert.equal(validateRecommendation(step('gym', 'Do your bodyweight workout'), ctx).ok, true);
+  const late = sundai();
+  const lctx = buildContext(late, '2026-10-04', analyze(late, '2026-10-04', { nowMin: 21 * 60 }), 21 * 60);
+  assert.equal(validateRecommendation(step('gym', 'Do your bodyweight workout'), lctx).ok, false); // too close to wind-down
+});
