@@ -1,67 +1,187 @@
-# Daywell — Personal Wellbeing Assistant (v7)
+# Daywell — Personal Wellbeing Assistant
 
-A local-first, non-work personal assistant for your **physical and mental**
-wellbeing that fits your busy schedule. Activities span **movement, meditation,
-wind-down, and music/mood**. A quick daily **check-in** (mood + energy) drives
-**what-would-help-right-now** suggestions, drawn from your own saved activities
-and your schedule. Everything stays in your browser on your device.
+A **local-first** web app for your **physical and mental** wellbeing. You log what
+you do (movement, meditation, wind-down, music/mood) by **text, voice, or file
+import**; Daywell shows how your week is tracking against **your own goals** and
+against **cited healthy-aging guidelines**, and gives you **one evidence-anchored
+next step** — including through a hands-free **voice companion**.
 
-> It does **not** diagnose, score your health, or infer a mental state. It
-> echoes *your* self-report and suggests activities *you* chose.
+Everything stays in your browser on your device. There is no account, no server,
+no cloud AI.
 
-## The four views
+> **What Daywell will never do:** diagnose you, score your health, infer a mental
+> state, or estimate/claim a biological age. It reports *what you logged* and how
+> it tracks against *goals you set* and *general cited guidance* — nothing more.
+> These boundaries are enforced everywhere, including in voice mode. See
+> [`docs/PRD_v2.2.md`](docs/PRD_v2.2.md) §R06 and §R12.
 
-- **Today** — a quick mood/energy **check-in**; **"what would help right now"**
-  (suggestions from your own activities, matched to your check-in, schedule, and
-  goals); a **wellbeing summary** (physical + mental) by day/week/month; and a
-  today-vs-plan match.
-- **Log** — record what you did (movement / meditation / wind-down / music) via
-  **text**, **voice** (browser speech recognition — disclosed), or **file
-  upload** (movement data: JSON, CSV, or Apple Health `export.xml`).
-- **Plan** — plan activities around your commitments and recover when something
-  can't happen (rain → indoor options placed in a real free window; a missed
-  meditation → an anytime fallback).
-- **Setup & Goals** — set weekly goals (movement sessions + minutes, mind
-  sessions), manage your activity library, import a Google Calendar `.ics`, and
-  follow the Apple Health **low-friction import** recipe.
+---
+
+## Highlights
+
+- 🎙️ **Speech-to-speech voice companion** — say **"Hey Daywell"**, get greeted by
+  name, then **log, summarize (day/week/month), and ask what to do next** — all by
+  voice. Answers come only from your own data.
+- 🎭 **Voice personas** — Companion, Coach, or Calm guide: each changes the wording
+  *and* the speech delivery (rate/pitch).
+- 🎉 **Goal-reached chime** — a short Web Audio fanfare plays when you cross a goal.
+- 📊 **Analytical dashboard** — progress rings vs your goals **and** a second layer
+  vs healthy-aging guidelines (WHO / CDC / NCCIH), with one prioritized next step.
+- ⏰ **Time-of-day triggers** — nudges the right activity for the moment (move in the
+  morning, wind down at night) from your stated routine.
+- 🔒 **Local-first & private** — browser `localStorage` only; export/import is a
+  backup, not a sync. No telemetry.
+
+---
+
+## The views
+
+### Today
+- **Talk to Daywell** — the voice companion (see below).
+- **Check-in** — a 20-second mood + energy self-report (your words, not an
+  assessment).
+- **Your week** — a status line, three **progress rings** (movement minutes,
+  movement sessions, mind sessions) vs *your goals*, a **"vs healthy-aging
+  guidelines"** layer, a **mood sparkline**, a **🔊 Listen** recap readback, and a
+  **"What you've done"** list showing which entries you logged by voice.
+- **Do next** — one prioritized, **evidence-anchored** recommendation (with its
+  cited source) plus actions to log or plan it.
+
+### Log
+- One seamless input for **text, voice, and manual** entry. Typing, tapping an
+  example, or speaking all flow through the same on-device parse + confirm.
+- **Deterministic parsing** (`parse.js`): categories by keyword, durations from
+  digits *or* spelled-out numbers ("ten minutes", "half an hour"); stray numbers
+  ("ran 5k") are deliberately **not** read as a duration.
+- **File import**: movement JSON/CSV, or Apple Health `export.xml` (workouts +
+  resting HR + sleep), filed by their own dates.
+
+### Plan
+- Plan activities around your commitments; **recover** when something can't happen
+  (rain → indoor option in a real free window; a missed session → an anytime
+  fallback).
+
+### Setup
+- **About you** — name, age, and **routine** times (wake / work / wind-down) that
+  power the time-of-day triggers.
+- **Voice persona & sound** — pick a persona, preview it, toggle the goal chime.
+- **Weekly goals**, **activity library**, **work calendar (`.ics`)**, **Apple
+  Health** import recipe, **reminders**, and **export / import / delete**.
+
+---
+
+## Voice companion
+
+Enable **"Hey Daywell"** (opt-in) and talk hands-free, or tap **Start voice mode**.
+
+```
+You:     Hey Daywell
+Daywell: Hey Sasa, how can I help?
+You:     I just finished a 30 minute walk
+Daywell: Nice one, Sasa — logged 30 minute walk, 30 minutes. Anything else?
+You:     how's my week
+Daywell: Nice — here's how this week looks. You logged 3 activities … 2 by voice.
+         On tracking, 3 goals behind pace. You're meeting 1 of 4 healthy-aging
+         guidelines.
+You:     switch to day        →  re-reads today's recap
+You:     what should I do next →  the time-aware next step
+You:     how's my mental health →  (honest refusal — points you to a clinician)
+```
+
+- **Deterministic, on-device intent** (`ask.js`) — not an LLM. It routes a phrase
+  to: log an activity, summarize a period, give the next step, answer a stat, or
+  refuse a health-judgment question.
+- **Wake word** (`WAKE_RE` in `app.js`) via the Web Speech API — best-effort and
+  browser-dependent; keeps the mic open while enabled (disclosed).
+- **Personas & TTS** — the browser's best available natural/neural voice, tuned per
+  persona. Quality depends on the browser/OS.
+
+---
+
+## How Daywell decides (the "science")
+
+`analyze.js` is deterministic and honest. For the current week it compares your
+logged behavior to:
+
+1. **Your own goals** — movement minutes/sessions and mind sessions you set. "Pace"
+   = progress relative to how far into the week you are, so *behind* means behind
+   *your* schedule, never a health judgment.
+2. **Healthy-aging guidelines** — general population guidance *associated with*
+   healthy aging, independent of your goals:
+   - Active minutes — **WHO** 150–300/week
+   - Strength days — **WHO** 2+/week (best-effort, detected from your log text)
+   - Sleep — **CDC / AASM** 7+ h/night
+   - Stress-reduction practice — **US NCCIH**
+
+The furthest-behind item becomes your **next step**, carrying its cited source.
+Guideline text lives in [`src/planner/evidence.js`](src/planner/evidence.js).
+
+> This is general guidance matched to your own goals — **not** medical advice, a
+> diagnosis, a personalized risk prediction, or a biological-age estimate.
+
+---
 
 ## Integrations — the honest reality
 
-- **Apple Health** has no browser API, so a web app can't read it live. To avoid
-  manual exporting, Setup includes an **iOS Shortcut recipe** that auto-exports
-  on a schedule; you then import that file under Log (one "open file" step).
-  Truly seamless sync would require a separate **native iOS app**.
-- **Google Calendar** connects via **`.ics` file import** (local-first, no
-  sign-in). Live auto-sync would need a backend + OAuth.
-- **Voice** uses the browser's speech recognition, which may send audio to a
-  provider and needs a connection — unlike the rest of the app. Disclosed at the
-  mic and feature-detected.
+| Integration | How it works today | The catch |
+| --- | --- | --- |
+| **Apple Health** | Setup includes an **iOS Shortcut recipe** to auto-export on a schedule; you import that file under Log | No browser API for live reads; truly seamless sync needs a **native iOS app** |
+| **Google Calendar** | **`.ics` file import** (local-first, no sign-in) → protected commitments | Live auto-sync would need a backend + OAuth |
+| **Voice input (STT)** | Browser Web Speech API | May send audio to the browser's online service; browser-dependent. Disclosed at the mic |
+| **Voice output (TTS)** | Browser SpeechSynthesis, best natural voice | Quality varies by OS/browser; premium/consistent voice needs native |
+| **Reminders** | Local notification when you open the app if you're off pace | A web page can't do reliable background push; that's a native-app capability |
+| **Biological age** | *Not computed, ever* | Requires lab biomarkers / DNA-methylation testing, not activity logs |
+
+---
 
 ## Run / test
 
 ```bash
 cd "daywell"
-python3 -m http.server 4173     # then open http://localhost:4173 (hard-refresh: Cmd+Shift+R)
-npm test                        # node --test tests/*.test.js — 54 cases
+python3 -m http.server 4173     # open http://localhost:4173  (hard-refresh: Cmd+Shift+R)
+npm test                        # node --test tests/*.test.js — 79 cases
 ```
 
-## Modules
+No build step, no dependencies — plain ES modules, vanilla JS, one CSS file.
+
+---
+
+## Architecture
+
+Composable, mostly-pure modules with a thin DOM controller. Business logic is
+deterministic and unit-tested; the UI and browser APIs (speech, audio,
+notifications) are thin, feature-detected wrappers.
 
 | Area | File |
 | --- | --- |
-| App state + validation/migration | src/planner/state.js |
-| Goals, summaries, plan-match | src/planner/goals.js |
-| Activity suggestion (by category) | src/planner/match.js |
-| Check-in assistant ("what helps now") | src/planner/assistant.js |
-| Contingency / recovery | src/planner/recovery.js |
-| Upload parsing (JSON/CSV/Apple Health) | src/planner/ingest.js |
-| Voice capture (browser STT) | src/planner/voice.js |
-| UI controller | src/planner/app.js |
-| Time-feasibility supervisor | src/supervisor.js |
-| Calendar .ics connector | src/skills/ics.js, src/connectors.js |
+| App state + validation / migration | `src/planner/state.js` |
+| Goals, progress, summaries, plan-match | `src/planner/goals.js` |
+| Analytical engine (rings, guidelines, next step) | `src/planner/analyze.js` |
+| Proactive nudges + time-of-day triggers | `src/planner/nudges.js` |
+| Recap ("what you've done", spoken) | `src/planner/recap.js` |
+| Voice Q&A / command intent (deterministic) | `src/planner/ask.js` |
+| Voice personas (characters) | `src/planner/persona.js` |
+| On-device text/voice parsing | `src/planner/parse.js` |
+| Activity suggestion (by category) | `src/planner/match.js` |
+| Contingency / recovery | `src/planner/recovery.js` |
+| Upload parsing (JSON / CSV / Apple Health) | `src/planner/ingest.js` |
+| Cited healthy-aging guidance | `src/planner/evidence.js` |
+| Voice capture (browser STT) | `src/planner/voice.js` |
+| UI controller (TTS, Web Audio chime, views) | `src/planner/app.js` |
+| Calendar `.ics` connector | `src/connectors.js`, `src/skills/ics.js` |
+| Time-feasibility supervisor | `src/supervisor.js` |
+| Safe DOM / time helpers | `src/dom.js`, `src/time.js` |
 
-## Boundaries
+Product requirements and the evaluation that shaped these boundaries are in
+[`docs/`](docs/). The pinned release manifest is [`RELEASE.json`](RELEASE.json).
 
-Local storage only; export/import is backup, not sync. No diagnosis, disease
-risk, biological age, calorie/nutrition math, or any health claim. See
-RELEASE.json for the pinned manifest.
+---
+
+## Privacy & boundaries
+
+- **Your data never leaves the device** (except what the browser's speech service
+  may do for voice input, which is disclosed). No account, server, or analytics.
+- **No health claims** — no diagnosis, disease-risk prediction, biological age,
+  calorie/nutrition math, or mental-health inference. Health-judgment questions get
+  an honest refusal and a pointer to a qualified professional.
+- Export/import is a **backup**, not a sync. Deleting clears this device only.
